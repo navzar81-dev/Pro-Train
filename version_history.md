@@ -4,7 +4,17 @@ This document tracks the major iterations, features, and enhancements implemente
 
 ---
 
-## Version 42 (Current Latest)
+## Version 43 (Current Latest)
+**File:** `training_planner_43.html`
+**Focus:** Relocation of Key Summaries to Dashboard
+
+- **Dashboard Integration:** Transferred the **Data Summary** and **Trainer Occupancy Summary - Live Preview** cards from the Reports tab directly into the Dashboard page layout, positioning them below the "Upcoming Trainings" and "Upcoming Resource Tasks" sections.
+- **Reports Clean-up:** Removed the live preview cards from the Reports tab, allowing it to focus exclusively on standard CSV file exports (Planned Training, Trainer Matrix, Room Occupancy, etc.).
+- **Retained Interactive Preview Functionality:** Preserved all dynamic summary features (color-coded utilization progress bars, live calculation of scheduled workdays/hours, and direct CSV exporting from the dashboard card header).
+
+---
+
+## Version 42
 **File:** `training_planner_42.html`
 **Focus:** Table Width Optimization, Compact Icon Actions, and Clean Modal Communications
 
