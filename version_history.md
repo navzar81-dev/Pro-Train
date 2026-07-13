@@ -4,7 +4,21 @@ This document tracks the major iterations, features, and enhancements implemente
 
 ---
 
-## Version 40 (Current Latest)
+## Version 41 (Current Latest)
+**File:** `training_planner_41.html`
+**Focus:** "On Hold" Status for Trainings/Tasks and Direct Table Toggling
+
+- **Schema Extension:** Added `isOnHold` flag to the database representations of trainings and tasks.
+- **Direct Table Row Toggle:** Added a quick toggle button (`⏸ Hold` / `▶ Resume`) in the row Actions column, permitting instant state changes with a single click.
+- **Edit Modal Controls:** Integrated matching "On Hold" checkboxes in the Add/Edit Training and Add/Edit Resource Task modals for unified state management.
+- **Priority Status Override:** Items with `isOnHold` set to `true` show a status of `On Hold` (styled as a purple badge) overriding normal date calculations.
+- **Timeline Visualization:** On-hold items display on the Gantt timeline with a styled dashed purple border, striped fill, and 65% opacity.
+- **Conflict Monitoring Preserved:** Double-booking conflict checks remain active for on-hold items so that their assigned resources (trainers and rooms) stay safely blocked.
+- **Filter and CSV Exports:** Added an "On Hold" chip to status filter row, and updated CSV exports to support exporting the "On Hold" status label.
+
+---
+
+## Version 40
 **File:** `training_planner_40.html`
 **Focus:** Bifurcated Conflict & Batch Status, Table Header Alignment, and UI Cleanup
 
