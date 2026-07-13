@@ -4,7 +4,18 @@ This document tracks the major iterations, features, and enhancements implemente
 
 ---
 
-## Version 41 (Current Latest)
+## Version 42 (Current Latest)
+**File:** `training_planner_42.html`
+**Focus:** Table Width Optimization, Compact Icon Actions, and Clean Modal Communications
+
+- **Compact Type Pills:** Shortened `▶ Training` and `⬡ Task` badges inside the Type column to simply **`TR`** and **`TA`** while maintaining their original teal and blue color themes.
+- **Redesigned Conflict Indicator:** Replaced the circular red `!` icon in the Name column with the bold red text **`[Conflict]`**, providing a cleaner and more professional look while retaining all interactive popover trigger behaviors.
+- **Icon-Based Row Actions:** Replaced full-text buttons (`Edit`, `Hold` / `Resume`, `Delete`) with compact, styled emoji/icon buttons (`✏️`, `⏸️` / `▶️`, `🗑️`) with title hover tooltips, reducing Actions column width significantly.
+- **Participants Modal Communication integration:** Consolidated all participant communication actions (Email, Teams, WhatsApp, ICS calendar invite) into the Participant Management Modal, removing clutter from the main table actions.
+
+---
+
+## Version 41
 **File:** `training_planner_41.html`
 **Focus:** "On Hold" Status for Trainings/Tasks and Direct Table Toggling
 
