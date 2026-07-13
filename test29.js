@@ -1,0 +1,4289 @@
+
+        // ===================== DATA STORE =====================
+        const COLORS = ['#2563eb', '#16a34a', '#9333ea', '#ea580c', '#0891b2', '#db2777', '#ca8a04', '#4f46e5'];
+
+        let data = {
+            trainers: [
+                { id: 't1', name: 'Dr. Sarah Johnson', expertise: 'Data Science', color: COLORS[0] },
+                { id: 't2', name: 'Prof. Michael Chen', expertise: 'Machine Learning', color: COLORS[1] },
+                { id: 't3', name: 'Emily Rodriguez', expertise: 'Project Management', color: COLORS[2] }
+            ],
+            rooms: [
+                { id: 'r1', name: 'Conference Hall A', capacity: 50, color: COLORS[3] },
+                { id: 'r2', name: 'Training Room B', capacity: 25, color: COLORS[4] },
+                { id: 'r3', name: 'Lab Room C', capacity: 20, color: COLORS[5] }
+            ],
+            holidays: [
+                { id: 'h1', name: 'New Year', date: '2026-01-01' },
+                { id: 'h2', name: 'Independence Day', date: '2026-07-04' },
+                { id: 'h3', name: 'Labor Day', date: '2026-09-07' }
+            ],
+            trainings: [],
+            tasks: [],
+            leaves: []  // trainer annual leave
+        };
+
+        // Load from localStorage if available, with safe field defaults
+        const saved = localStorage.getItem('protrain_data');
+        if (saved) {
+            try {
+                const parsed = JSON.parse(saved);
+                data = { ...data, ...parsed };
+                // Ensure every new field has a safe default for older stored data
+                if (!data.tasks)  data.tasks  = [];
+                if (!data.leaves) data.leaves = [];
+                data.trainers.forEach(t  => { if (!t.color) t.color = COLORS[0]; });
+                data.rooms.forEach(r     => { if (!r.color) r.color = COLORS[3]; });
+                data.trainings.forEach(t => {
+                    if (t.hoursPerDay   === undefined) t.hoursPerDay   = 8;
+                    if (!t.includedDates)              t.includedDates = [];
+                    if (t.isOnline      === undefined) t.isOnline      = false;
+                });
+                data.tasks.forEach(t => {
+                    if (t.hoursPerDay   === undefined) t.hoursPerDay   = 8;
+                    if (!t.includedDates)              t.includedDates = [];
+                });
+                data.leaves.forEach(l => {
+                    if (!l.leaveDays || l.leaveDays.length === 0) {
+                        l.leaveDays = getWorkingDaysBetween(l.startDate, l.endDate).map(d => formatDate(d));
+                    }
+                });
+            } catch(e) {}
+        }
+
+        // Migrate stale trainings: recalculate endDate for any training whose
+        // stored endDate lands on a weekend or holiday (saved before the fix).
+        // We do this after holidays are loaded so isHoliday() works correctly.
+        function migrateTrainingEndDates() {
+            let changed = false;
+            data.trainings.forEach(t => {
+                const end = new Date(t.endDate);
+                if (isWeekend(end) || isHoliday(end)) {
+                    // Re-derive the end date from startDate + working day count
+                    const workDays = getTrainingWorkingDays(t);
+                    if (workDays.length > 0) {
+                        const correctEnd = formatDate(workDays[workDays.length - 1]);
+                        if (correctEnd !== t.endDate) {
+                            t.endDate = correctEnd;
+                            changed = true;
+                        }
+                    }
+                }
+            });
+            if (changed) {
+                localStorage.setItem('protrain_data', JSON.stringify(data));
+            }
+        }
+
+        // ===================== UNSAVED STATE =====================
+        let hasUnsavedChanges = false;
+
+        function markUnsaved() {
+            hasUnsavedChanges = true;
+            const badge = document.getElementById('unsaved-badge');
+            const btn = document.getElementById('save-db-btn');
+            if (badge) badge.classList.add('visible');
+            if (btn) btn.classList.add('save-db-btn-pulse');
+        }
+
+        function markSaved() {
+            hasUnsavedChanges = false;
+            const badge = document.getElementById('unsaved-badge');
+            const btn = document.getElementById('save-db-btn');
+            if (badge) badge.classList.remove('visible');
+            if (btn) btn.classList.remove('save-db-btn-pulse');
+        }
+
+        function saveData() {
+            localStorage.setItem('protrain_data', JSON.stringify(data));
+            markUnsaved(); // data changed — flag for DB export
+        }
+
+        function saveDB() {
+            const exportData = { ...data, _exported: new Date().toISOString(), _version: '1.0' };
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            const date = new Date().toISOString().slice(0, 10);
+            a.href = URL.createObjectURL(blob);
+            a.download = `protrain_backup_${date}.json`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+            markSaved();
+            showToast('✓ Database saved successfully');
+        }
+
+        function importDB(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = e => {
+                try {
+                    const parsed = JSON.parse(e.target.result);
+                    if (!parsed.trainers && !parsed.trainings && !parsed.rooms && !parsed.holidays) {
+                        showToast('⚠ Invalid file — does not appear to be a ProTrain database', true);
+                        return;
+                    }
+                    if (!confirm(`Import database from "${file.name}"?\n\nThis will REPLACE all current data.\n\nMake sure you have saved a backup first.`)) {
+                        input.value = '';
+                        return;
+                    }
+
+                    // Rebuild data with safe defaults for every field ever added
+                    data = {
+                        trainers:  (parsed.trainers  || []).map(t => ({
+                            id:        t.id        || generateId('t'),
+                            name:      t.name      || '',
+                            expertise: t.expertise || '',
+                            color:     t.color     || COLORS[0]
+                        })),
+                        rooms: (parsed.rooms || []).map(r => ({
+                            id:       r.id       || generateId('r'),
+                            name:     r.name     || '',
+                            capacity: r.capacity || 20,
+                            color:    r.color    || COLORS[3]
+                        })),
+                        holidays: (parsed.holidays || []).map(h => ({
+                            id:   h.id   || generateId('h'),
+                            name: h.name || '',
+                            date: normaliseDate(h.date) || h.date
+                        })),
+                        trainings: (parsed.trainings || []).map(t => ({
+                            id:            t.id            || generateId('tr'),
+                            name:          t.name          || '',
+                            trainerId:     t.trainerId     || NO_TRAINER_ID,
+                            roomId:        t.roomId        || NO_ROOM_ID,
+                            isOnline:      t.isOnline      || false,
+                            startDate:     normaliseDate(t.startDate) || t.startDate,
+                            endDate:       normaliseDate(t.endDate)   || t.endDate,
+                            hoursPerDay:   t.hoursPerDay   || 8,
+                            includedDates: t.includedDates || [],
+                            color:         t.color         || COLORS[0]
+                        })),
+                        tasks: (parsed.tasks || []).map(t => ({
+                            id:            t.id            || generateId('tk'),
+                            name:          t.name          || '',
+                            trainerId:     t.trainerId     || null,
+                            roomId:        t.roomId        || null,
+                            startDate:     normaliseDate(t.startDate) || t.startDate,
+                            endDate:       normaliseDate(t.endDate)   || t.endDate,
+                            hoursPerDay:   t.hoursPerDay   || 8,
+                            includedDates: t.includedDates || [],
+                            color:         t.color         || '#14b8a6'
+                        })),
+                        leaves: (parsed.leaves || []).map(l => ({
+                            id:        l.id        || generateId('lv'),
+                            trainerId: l.trainerId || '',
+                            name:      l.name      || '',
+                            startDate: normaliseDate(l.startDate) || l.startDate,
+                            endDate:   normaliseDate(l.endDate)   || l.endDate,
+                            leaveDays: l.leaveDays || []
+                        }))
+                    };
+
+                    // Re-derive leaveDays for any leave entry that has none (older exports)
+                    data.leaves.forEach(l => {
+                        if (!l.leaveDays || l.leaveDays.length === 0) {
+                            l.leaveDays = getWorkingDaysBetween(l.startDate, l.endDate).map(d => formatDate(d));
+                        }
+                    });
+
+                    localStorage.setItem('protrain_data', JSON.stringify(data));
+
+                    // Run end-date migration in case old file has weekend-landing endDates
+                    migrateTrainingEndDates();
+
+                    markSaved();
+                    renderPage();
+
+                    const version = parsed._version ? ` (v${parsed._version})` : '';
+                    const exported = parsed._exported ? `, saved ${new Date(parsed._exported).toLocaleDateString()}` : '';
+                    showToast(`✓ Imported${version}${exported} — ${data.trainings.length} trainings, ${data.trainers.length} trainers, ${data.rooms.length} rooms, ${data.leaves.length} leave entries`);
+                } catch(err) {
+                    showToast('⚠ Failed to parse file — make sure it is a valid JSON backup', true);
+                }
+                input.value = '';
+            };
+            reader.readAsText(file);
+        }
+
+        function showToast(message, isError = false) {
+            let toast = document.getElementById('db-toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'db-toast';
+                toast.style.cssText = `
+                    position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+                    padding:10px 20px; border-radius:8px; font-size:13px; font-weight:500;
+                    z-index:9999; box-shadow:0 4px 12px rgba(0,0,0,0.15);
+                    transition:opacity 0.3s; pointer-events:none;
+                `;
+                document.body.appendChild(toast);
+            }
+            toast.textContent = message;
+            toast.style.background = isError ? '#fef2f2' : '#f0fdf4';
+            toast.style.color = isError ? '#b91c1c' : '#15803d';
+            toast.style.border = `1px solid ${isError ? '#fecaca' : '#bbf7d0'}`;
+            toast.style.opacity = '1';
+            clearTimeout(toast._timer);
+            toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, 3000);
+        }
+
+        function generateId(prefix) {
+            return prefix + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+        }
+
+        // ===================== DATE UTILITIES =====================
+        function parseDate(str) {
+            const [y, m, d] = str.split('-').map(Number);
+            return new Date(y, m - 1, d);
+        }
+
+        function formatDate(date) {
+            const d = new Date(date);
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        }
+
+        function formatDisplayDate(date) {
+            const d = new Date(date);
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+
+        function isWeekend(date) {
+            const day = new Date(date).getDay();
+            return day === 0 || day === 6;
+        }
+
+        function isHoliday(date) {
+            const d = formatDate(date);
+            return data.holidays.some(h => h.date === d);
+        }
+
+        function isWorkingDay(date) {
+            return !isWeekend(date) && !isHoliday(date);
+        }
+
+        function getHolidayName(date) {
+            const d = formatDate(date);
+            const h = data.holidays.find(h => h.date === d);
+            return h ? h.name : null;
+        }
+
+        function addWorkingDays(startDate, days, includedDates = []) {
+            const included = new Set(includedDates);
+            let current = new Date(startDate);
+            let count = 0;
+            while (count < days) {
+                current.setDate(current.getDate() + 1);
+                const key = formatDate(current);
+                if (isWorkingDay(current) || included.has(key)) {
+                    count++;
+                }
+            }
+            return current;
+        }
+
+        function getWorkingDaysBetween(start, end) {
+            const days = [];
+            let current = new Date(start);
+            const endDate = new Date(end);
+            while (current <= endDate) {
+                if (isWorkingDay(current)) {
+                    days.push(new Date(current));
+                }
+                current.setDate(current.getDate() + 1);
+            }
+            return days;
+        }
+
+        function getTrainingWorkingDays(training) {
+            // Collect all days between start and end
+            const days = [];
+            let current = new Date(training.startDate);
+            const endDate = new Date(training.endDate);
+            const included = new Set(training.includedDates || []);
+            while (current <= endDate) {
+                const key = formatDate(current);
+                const normalWorking = isWorkingDay(current);
+                const overridden = included.has(key);
+                if (normalWorking || overridden) {
+                    days.push(new Date(current));
+                }
+                current.setDate(current.getDate() + 1);
+            }
+            return days;
+        }
+
+        // ===================== CONFLICT DETECTION =====================
+        function getOccupiedDates(entityType, entityId, excludeTrainingId = null) {
+            const occupied = new Map();
+            if (!entityId || entityId === NO_TRAINER_ID || entityId === NO_ROOM_ID) return occupied;
+            data.trainings.forEach(t => {
+                if (excludeTrainingId && t.id === excludeTrainingId) return;
+                const match = entityType === 'trainer' ? t.trainerId === entityId : t.roomId === entityId;
+                if (match) {
+                    const days = getTrainingWorkingDays(t);
+                    days.forEach(d => { occupied.set(formatDate(d), t); });
+                }
+            });
+            return occupied;
+        }
+
+        function checkConflicts(training, excludeId = null) {
+            const conflicts = [];
+            const selfExclude = excludeId || training.id;
+            const workDays = getTrainingWorkingDays(training);
+
+            // Flag unresolved placeholder assignments
+            if (training.trainerId === NO_TRAINER_ID) {
+                conflicts.push({ type: 'trainer', message: 'No trainer assigned — needs resolution' });
+            }
+            if (training.roomId === NO_ROOM_ID) {
+                conflicts.push({ type: 'room', message: 'No room assigned — needs resolution' });
+            }
+
+            // Skip double-booking check for sentinels
+            if (training.trainerId && training.trainerId !== NO_TRAINER_ID) {
+                const trainerOccupied = getOccupiedDates('trainer', training.trainerId, selfExclude);
+                workDays.forEach(d => {
+                    const key = formatDate(d);
+                    if (trainerOccupied.has(key)) {
+                        const other = trainerOccupied.get(key);
+                        conflicts.push({ type: 'trainer', date: key, message: `Trainer already booked on ${formatDisplayDate(d)} for "${other.name}"` });
+                    }
+                });
+            }
+
+            // Skip room conflict entirely for online sessions
+            if (!training.isOnline && training.roomId && training.roomId !== NO_ROOM_ID && training.roomId !== 'ONLINE') {
+                const roomOccupied = getOccupiedDates('room', training.roomId, selfExclude);
+                workDays.forEach(d => {
+                    const key = formatDate(d);
+                    if (roomOccupied.has(key)) {
+                        const other = roomOccupied.get(key);
+                        conflicts.push({ type: 'room', date: key, message: `Room already booked on ${formatDisplayDate(d)} for "${other.name}"` });
+                    }
+                });
+            }
+
+            // Check trainer annual leave overlap (soft warn)
+            if (training.trainerId && training.trainerId !== NO_TRAINER_ID) {
+                const trainerLeaves = data.leaves.filter(l => l.trainerId === training.trainerId);
+                workDays.forEach(d => {
+                    const key = formatDate(d);
+                    trainerLeaves.forEach(l => {
+                        if (l.leaveDays && l.leaveDays.includes(key)) {
+                            conflicts.push({ type: 'leave', date: key, message: `Trainer on annual leave on ${formatDisplayDate(d)} (${l.name})` });
+                        }
+                    });
+                });
+            }
+
+            return conflicts;
+        }
+
+        // ===================== UI STATE =====================
+        let currentPage = 'dashboard';
+        let modalCallback = null;
+        let editingId = null;
+        let ganttView = 'trainers'; // 'trainers', 'rooms', 'activities'
+        let ganttSsFilter = 'all'; // sub-section filter for gantt
+        let ganttFilterFrom = '';
+        let ganttFilterTo = '';
+
+        // Trainings table state
+        let trainingSortCol = 'startDate';
+        let trainingSortDir = 'desc'; // default: newest first
+        let trainingSearch  = '';
+        let trainingFilter  = 'all'; // 'all' | 'training' | 'task'
+        let ssFilter        = 'all'; // 'all' | sub-section name
+
+        // ===================== AUTH / ROLE SYSTEM =====================
+        // Default PIN is 1234. Once changed via the app, the new PIN is saved
+        // in localStorage and used from then on — no code editing needed.
+        const DEFAULT_PIN_HASH = '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4'; // SHA-256 of "1234"
+
+        function getActivePinHash() {
+            return localStorage.getItem('protrain_pin_hash') || DEFAULT_PIN_HASH;
+        }
+
+        let isAdmin = false;
+
+        if (sessionStorage.getItem('protrain_admin') === 'true') {
+            isAdmin = true;
+        }
+
+        async function hashPin(pin) {
+            const msgBuffer = new TextEncoder().encode(pin);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        function handleRoleToggle() {
+            if (isAdmin) lockAdmin();
+            else openPinModal();
+        }
+
+        // ---- Generic PIN keypad builder ----
+        function buildPinModal(title, subtitle, onComplete) {
+            window._pinEntry = '';
+            window._pinMax = 4;
+            window._pinOnComplete = onComplete;
+
+            openModal(title, `
+                <div style="text-align:center;padding:8px 0;">
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="1.5" style="margin-bottom:8px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    <div style="font-size:13px;color:var(--text-light);margin-bottom:4px;">${subtitle}</div>
+                    <div class="pin-dots">
+                        <div class="pin-dot" id="pd0"></div>
+                        <div class="pin-dot" id="pd1"></div>
+                        <div class="pin-dot" id="pd2"></div>
+                        <div class="pin-dot" id="pd3"></div>
+                    </div>
+                    <div class="pin-error" id="pin-error"></div>
+                    <div class="pin-keypad">
+                        ${[1,2,3,4,5,6,7,8,9,'','0','⌫'].map(k =>
+                            `<button class="pin-key ${k==='⌫'?'del':''}" onclick="pinKeyPress('${k}')">${k}</button>`
+                        ).join('')}
+                    </div>
+                </div>
+            `, () => {});
+            document.getElementById('modal-save').style.display = 'none';
+        }
+
+        window.pinKeyPress = function(key) {
+            const entry = window._pinEntry || '';
+            const err = document.getElementById('pin-error');
+            if (err) err.textContent = '';
+
+            if (key === '⌫') {
+                window._pinEntry = entry.slice(0, -1);
+            } else if (key === '') {
+                return;
+            } else if (entry.length < window._pinMax) {
+                window._pinEntry = entry + key;
+            }
+
+            for (let i = 0; i < window._pinMax; i++) {
+                const dot = document.getElementById('pd' + i);
+                if (dot) dot.classList.toggle('filled', i < window._pinEntry.length);
+            }
+
+            if (window._pinEntry.length === window._pinMax) {
+                setTimeout(() => window._pinOnComplete(window._pinEntry), 120);
+            }
+        };
+
+        function flashPinError(msg) {
+            window._pinEntry = '';
+            for (let i = 0; i < 4; i++) {
+                const dot = document.getElementById('pd' + i);
+                if (dot) { dot.classList.remove('filled'); dot.style.borderColor = '#dc2626'; }
+            }
+            const err = document.getElementById('pin-error');
+            if (err) err.textContent = msg;
+            setTimeout(() => {
+                for (let i = 0; i < 4; i++) {
+                    const dot = document.getElementById('pd' + i);
+                    if (dot) dot.style.borderColor = '';
+                }
+            }, 800);
+        }
+
+        // ---- Admin Login ----
+        function openPinModal() {
+            buildPinModal('Admin Login', 'Enter your 4-digit admin PIN', async (pin) => {
+                const hash = await hashPin(pin);
+                if (hash === getActivePinHash()) {
+                    isAdmin = true;
+                    sessionStorage.setItem('protrain_admin', 'true');
+                    closeModal();
+                    applyRoleUI();
+                    showToast('✓ Admin mode unlocked');
+                } else {
+                    flashPinError('Incorrect PIN. Try again.');
+                }
+            });
+        }
+
+        // ---- Change PIN (3 steps: current → new → confirm new) ----
+        function openChangePinModal() {
+            // Step 1: Verify current PIN
+            buildPinModal('Change PIN — Step 1 of 3', 'First, enter your current PIN to confirm it\'s you', async (currentPin) => {
+                const hash = await hashPin(currentPin);
+                if (hash !== getActivePinHash()) {
+                    flashPinError('Incorrect current PIN. Try again.');
+                    return;
+                }
+                // Step 2: Enter new PIN
+                window._pinEntry = '';
+                document.getElementById('modal-title').textContent = 'Change PIN — Step 2 of 3';
+                document.querySelector('.modal-body div[style]').querySelector('div[style*="font-size:13px"]').textContent = 'Enter your new 4-digit PIN';
+                for (let i = 0; i < 4; i++) { const d = document.getElementById('pd'+i); if(d){d.classList.remove('filled');d.style.borderColor='';} }
+                const err = document.getElementById('pin-error'); if(err) err.textContent = '';
+
+                window._pinOnComplete = async (newPin) => {
+                    if (newPin.length !== 4) { flashPinError('PIN must be exactly 4 digits.'); return; }
+                    const newHash = await hashPin(newPin);
+                    // Step 3: Confirm new PIN
+                    window._pinEntry = '';
+                    document.getElementById('modal-title').textContent = 'Change PIN — Step 3 of 3';
+                    document.querySelector('.modal-body div[style]').querySelector('div[style*="font-size:13px"]').textContent = 'Re-enter your new PIN to confirm';
+                    for (let i = 0; i < 4; i++) { const d = document.getElementById('pd'+i); if(d){d.classList.remove('filled');d.style.borderColor='';} }
+                    const err2 = document.getElementById('pin-error'); if(err2) err2.textContent = '';
+
+                    window._pinOnComplete = async (confirmPin) => {
+                        const confirmHash = await hashPin(confirmPin);
+                        if (confirmHash !== newHash) {
+                            flashPinError('PINs don\'t match. Starting over.');
+                            setTimeout(() => openChangePinModal(), 900);
+                            return;
+                        }
+                        // Save new hash
+                        localStorage.setItem('protrain_pin_hash', newHash);
+                        closeModal();
+                        showToast('✓ PIN changed successfully');
+                    };
+                };
+            });
+        }
+
+        function lockAdmin() {
+            if (!confirm('Lock admin session? You will return to View Only mode.')) return;
+            isAdmin = false;
+            sessionStorage.removeItem('protrain_admin');
+            applyRoleUI();
+            renderPage();
+            showToast('🔒 Locked — View Only mode');
+        }
+
+        function applyRoleUI() {
+            const indicator = document.getElementById('role-indicator');
+            const toggleBtn = document.getElementById('btn-role-toggle');
+            const saveDbBtn = document.getElementById('save-db-btn');
+            const viewerBanner = document.getElementById('viewer-banner');
+            const changePinBtn = document.getElementById('btn-change-pin');
+
+            if (isAdmin) {
+                indicator.className = 'role-badge-admin';
+                indicator.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Admin`;
+                toggleBtn.className = 'btn btn-admin-lock btn-sm';
+                toggleBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg> Lock Session`;
+                if (saveDbBtn) saveDbBtn.style.display = 'inline-flex';
+                if (viewerBanner) viewerBanner.classList.add('hidden');
+                if (changePinBtn) changePinBtn.style.display = 'inline-flex';
+            } else {
+                indicator.className = 'role-badge-viewer';
+                indicator.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> View Only`;
+                toggleBtn.className = 'btn btn-admin-login btn-sm';
+                toggleBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Admin Login`;
+                if (saveDbBtn) saveDbBtn.style.display = 'none';
+                if (viewerBanner) viewerBanner.classList.remove('hidden');
+                if (changePinBtn) changePinBtn.style.display = 'none';
+            }
+        }
+
+        // ===================== NAVIGATION =====================
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                currentPage = item.dataset.page;
+                renderPage();
+            });
+        });
+
+        function renderPage() {
+            const content = document.getElementById('content');
+            const title = document.getElementById('page-title');
+            const btnAdd = document.getElementById('btn-add');
+
+            // Write buttons only visible to admins
+            const onWritePage = ['trainers', 'rooms', 'holidays', 'trainings'].includes(currentPage);
+            btnAdd.style.display = (isAdmin && onWritePage) ? 'inline-flex' : 'none';
+            btnAdd.onclick = () => openAddModal();
+            document.getElementById('btn-import').style.display = (isAdmin && onWritePage) ? 'inline-flex' : 'none';
+            document.getElementById('btn-add-task').style.display = (isAdmin && currentPage === 'trainings') ? 'inline-flex' : 'none';
+            document.getElementById('btn-batch').style.display = (isAdmin && currentPage === 'trainings') ? 'inline-flex' : 'none';
+
+            switch(currentPage) {
+                case 'dashboard': renderDashboard(); break;
+                case 'trainings': renderTrainings(); break;
+                case 'gantt': renderGantt(); break;
+                case 'trainers': renderTrainers(); break;
+                case 'rooms': renderRooms(); break;
+                case 'holidays': renderHolidays(); break;
+                case 'reports': renderReports(); break;
+            }
+        }
+
+        // ===================== DASHBOARD =====================
+        function renderDashboard() {
+            document.getElementById('page-title').textContent = 'Dashboard';
+            const upcoming = data.trainings
+                .filter(t => new Date(t.startDate) >= new Date())
+                .sort((a, b) => new Date(a.startDate) - new Date(b.startDate))
+                .slice(0, 5);
+
+            const totalWorkDays = data.trainings.reduce((sum, t) => {
+                return sum + getTrainingWorkingDays(t).length;
+            }, 0);
+
+            const totalHours = data.trainings.reduce((sum, t) => {
+                const days = getTrainingWorkingDays(t).length;
+                const hpd = t.hoursPerDay || 8;
+                return sum + (days * hpd);
+            }, 0);
+
+            const upcomingTasks = data.tasks
+                .filter(t => new Date(t.startDate) >= new Date())
+                .sort((a, b) => new Date(a.startDate) - new Date(b.startDate))
+                .slice(0, 3);
+            
+            const totalParticipants = data.trainings.reduce((sum, t) => sum + (t.participants ? t.participants.length : 0), 0);
+
+            document.getElementById('content').innerHTML = `
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value">${data.trainings.length}</div>
+                        <div class="stat-label">Total Trainings</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${data.tasks.length}</div>
+                        <div class="stat-label">Resource Tasks</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${data.trainers.length}</div>
+                        <div class="stat-label">Trainers</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${data.rooms.length}</div>
+                        <div class="stat-label">Rooms</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${totalParticipants}</div>
+                        <div class="stat-label">Participants Enrolled</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${totalWorkDays}</div>
+                        <div class="stat-label">Working Days Scheduled</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1)}</div>
+                        <div class="stat-label">Total Training Hours</div>
+                    </div>
+                </div>
+                <!-- Sub-Section Breakdown -->
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+                        <h2 class="card-title">Sub-Section Breakdown</h2>
+                    </div>
+                    <div class="card-body" style="padding:0;">
+                        <table class="ss-breakdown">
+                            <thead><tr>
+                                <th>Sub-Section</th>
+                                <th style="text-align:center;">Sessions</th>
+                                <th style="text-align:center;">Participants</th>
+                                <th style="text-align:center;">Working Days</th>
+                                <th style="text-align:center;">Total Hours</th>
+                                <th style="text-align:center;">Upcoming</th>
+                                <th style="text-align:center;">Conflicts</th>
+                            </tr></thead>
+                            <tbody>
+                                ${[...SUB_SECTIONS, null].map(ss => {
+                                    const group = data.trainings.filter(t => ss ? t.subSection === ss : !t.subSection || !SUB_SECTIONS.includes(t.subSection));
+                                    if (group.length === 0 && ss !== null) return '';
+                                    if (group.length === 0) return '';
+                                    const days  = group.reduce((s,t) => s + getTrainingWorkingDays(t).length, 0);
+                                    const parts = group.reduce((s,t) => s + (t.participants ? t.participants.length : 0), 0);
+                                    const hours = group.reduce((s,t) => s + getTrainingWorkingDays(t).length * (t.hoursPerDay||8), 0);
+                                    const upcoming = group.filter(t => new Date(t.startDate) > new Date()).length;
+                                    const conflicts = group.filter(t => checkConflicts(t).length > 0).length;
+                                    const label = ss || 'Unassigned';
+                                    const pill  = ssLabel(ss);
+                                    return `<tr>
+                                        <td>${pill}</td>
+                                        <td style="text-align:center;font-weight:600;">${group.length}</td>
+                                        <td style="text-align:center;">${parts}</td>
+                                        <td style="text-align:center;">${days}</td>
+                                        <td style="text-align:center;">${hours % 1 === 0 ? hours : hours.toFixed(1)}h</td>
+                                        <td style="text-align:center;">${upcoming}</td>
+                                        <td style="text-align:center;">${conflicts > 0 ? `<span style="color:#dc2626;font-weight:700;">⚠ ${conflicts}</span>` : '<span style="color:#16a34a;">✓ None</span>'}</td>
+                                    </tr>`;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">Upcoming Trainings</span>
+                        <button class="btn btn-sm btn-secondary" onclick="navigateTo('trainings')">View All</button>
+                    </div>
+                    <div class="card-body">
+                        ${upcoming.length === 0 ? `
+                            <div class="empty-state">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                                <h3>No upcoming trainings</h3>
+                                <p>Schedule your first training to get started</p>
+                            </div>
+                        ` : `
+                            <table class="data-table">
+                                <thead><tr><th>Training</th><th>Trainer</th><th>Room</th><th>Start Date</th><th>Duration</th><th>Enrolled</th></tr></thead>
+                                <tbody>
+                                    ${upcoming.map(t => {
+                                        const trainer = data.trainers.find(tr => tr.id === t.trainerId);
+                                        const room = data.rooms.find(r => r.id === t.roomId);
+                                        const days = getTrainingWorkingDays(t).length;
+                                        const hpd = t.hoursPerDay || 8;
+                                        const totalH = days * hpd;
+                                        const capacity = room && room.capacity ? parseInt(room.capacity) : Infinity;
+                                        const enrolled = t.participants ? t.participants.length : 0;
+                                        let enrolledClass = '';
+                                        if (capacity !== Infinity) {
+                                            if (enrolled > capacity) enrolledClass = 'color:var(--danger);font-weight:bold;';
+                                            else if (enrolled === capacity) enrolledClass = 'color:var(--warning);font-weight:bold;';
+                                        }
+                                        const enrolledDisplay = `<span style="${enrolledClass}">${enrolled} ${capacity !== Infinity ? '/ ' + capacity : ''}</span>`;
+                                        return `<tr>
+                                            <td><strong>${t.name}</strong></td>
+                                            <td>${trainer ? trainer.name : 'Unknown'}</td>
+                                            <td>${room ? room.name : 'Unknown'}</td>
+                                            <td>${formatDisplayDate(t.startDate)}</td>
+                                            <td><span class="badge badge-blue">${days}d × ${hpd}h = ${totalH % 1 === 0 ? totalH : totalH.toFixed(1)}h</span></td>
+                                            <td>${enrolledDisplay}</td>
+                                        </tr>`;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        `}
+                    </div>
+                </div>
+                ${upcomingTasks.length > 0 ? `
+                <div class="card" style="margin-top:20px;">
+                    <div class="card-header">
+                        <span class="card-title" style="color:#0f766e;">⬡ Upcoming Resource Tasks</span>
+                        <button class="btn btn-sm btn-secondary" onclick="navigateTo('trainings')">View All</button>
+                    </div>
+                    <div class="card-body">
+                        <table class="data-table">
+                            <thead><tr><th>Task</th><th>Assigned To</th><th>Start Date</th><th>Duration</th></tr></thead>
+                            <tbody>
+                                ${upcomingTasks.map(t => {
+                                    const trainer = t.trainerId ? data.trainers.find(tr => tr.id === t.trainerId) : null;
+                                    const room = t.roomId ? data.rooms.find(r => r.id === t.roomId) : null;
+                                    const days = getTrainingWorkingDays(t).length;
+                                    const hpd = t.hoursPerDay || 8;
+                                    const assigned = [trainer?.name, room?.name].filter(Boolean).join(', ') || '—';
+                                    return `<tr class="row-task">
+                                        <td><strong>${t.name}</strong> <span class="task-type-pill">Task</span></td>
+                                        <td>${assigned}</td>
+                                        <td>${formatDisplayDate(t.startDate)}</td>
+                                        <td><span class="badge badge-teal">${days}d × ${hpd}h</span></td>
+                                    </tr>`;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>` : ''}
+            `;
+        }
+
+        // ===================== TRAININGS =====================
+        function renderTrainings() {
+            document.getElementById('page-title').textContent = 'Trainings & Tasks';
+
+            // Build merged list with _type tag
+            const allItems = [
+                ...data.trainings.map(t => ({...t, _type:'training'})),
+                ...data.tasks.map(t => ({...t, _type:'task'}))
+            ];
+
+            // Enrich each item for sorting/searching
+            const enriched = allItems.map(t => {
+                const isTask = t._type === 'task';
+                const trainer = t.trainerId && t.trainerId !== NO_TRAINER_ID ? data.trainers.find(tr => tr.id === t.trainerId) : null;
+                const room    = t.isOnline ? null : (t.roomId && t.roomId !== NO_ROOM_ID ? data.rooms.find(r => r.id === t.roomId) : null);
+                const workDays   = getTrainingWorkingDays(t);
+                const hpd        = t.hoursPerDay || 8;
+                const totalHours = workDays.length * hpd;
+                const conflicts  = isTask ? [] : checkConflicts(t);
+                const hasConflict = conflicts.length > 0;
+                const isPast   = new Date(t.endDate) < new Date();
+                const isActive = new Date(t.startDate) <= new Date() && new Date(t.endDate) >= new Date();
+                const status   = hasConflict ? 'conflict' : isPast ? 'completed' : isActive ? 'inprogress' : 'upcoming';
+                const statusLabel = hasConflict ? 'Conflict' : isPast ? 'Completed' : isActive ? 'In Progress' : 'Upcoming';
+                const trainerName = t.trainerId === NO_TRAINER_ID ? 'No Trainer' : (trainer ? trainer.name : '');
+                const roomName    = t.isOnline ? 'Online' : (t.roomId === NO_ROOM_ID ? 'No Room' : (room ? room.name : ''));
+                const subSection  = t.subSection || '';
+                return { ...t, isTask, trainer, room, workDays, hpd, totalHours, conflicts, hasConflict, isPast, isActive, status, statusLabel, trainerName, roomName, subSection };
+            });
+
+            // Filter by type
+            let filtered = enriched;
+            if (trainingFilter === 'training') filtered = filtered.filter(t => !t.isTask);
+            if (trainingFilter === 'task')     filtered = filtered.filter(t => t.isTask);
+            // Filter by sub-section
+            if (ssFilter !== 'all') filtered = filtered.filter(t => t.subSection === ssFilter);
+
+            // Search
+            const q = trainingSearch.trim().toLowerCase();
+            if (q) {
+                filtered = filtered.filter(t =>
+                    t.name.toLowerCase().includes(q) ||
+                    t.trainerName.toLowerCase().includes(q) ||
+                    t.roomName.toLowerCase().includes(q) ||
+                    t.status.toLowerCase().includes(q) ||
+                    t.statusLabel.toLowerCase().includes(q) ||
+                    (t.isTask ? 'task' : 'training').includes(q) ||
+                    t.startDate.includes(q) || t.endDate.includes(q)
+                );
+            }
+
+            // Sort
+            const dir = trainingSortDir === 'asc' ? 1 : -1;
+            filtered.sort((a, b) => {
+                switch (trainingSortCol) {
+                    case 'type':       return dir * ((a.isTask ? 1 : 0) - (b.isTask ? 1 : 0));
+                    case 'name':       return dir * a.name.localeCompare(b.name);
+                    case 'subSection': return dir * (a.subSection||'').localeCompare(b.subSection||'');
+                    case 'trainer':    return dir * a.trainerName.localeCompare(b.trainerName);
+                    case 'room':       return dir * a.roomName.localeCompare(b.roomName);
+                    case 'startDate':  return dir * (new Date(a.startDate) - new Date(b.startDate));
+                    case 'endDate':    return dir * (new Date(a.endDate) - new Date(b.endDate));
+                    case 'totalHours': return dir * (a.totalHours - b.totalHours);
+                    case 'status':     return dir * a.status.localeCompare(b.status);
+                    default:           return 0;
+                }
+            });
+
+            const thClass = col => {
+                const base = 'sortable-th';
+                if (trainingSortCol === col) return `${base} ${trainingSortDir === 'asc' ? 'sort-asc' : 'sort-desc'}`;
+                return base;
+            };
+            const th = (col, label) => `<th class="${thClass(col)}" onclick="sortTrainings('${col}')">${label}<span class="sort-icon"></span></th>`;
+
+            document.getElementById('content').innerHTML = `
+                <div class="card">
+                    <div class="trainings-toolbar">
+                        <div class="search-wrap">
+                            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            <input class="search-input" id="training-search-input" type="text"
+                                placeholder="Search name, trainer, room, status…"
+                                value="${trainingSearch}"
+                                oninput="onTrainingSearch(this.value)">
+                            <button class="search-clear ${trainingSearch ? 'visible' : ''}" id="search-clear-btn" onclick="onTrainingSearch('')">✕</button>
+                        </div>
+                        <div class="filter-chips">
+                            <span style="font-size:12px;color:var(--text-light);font-weight:500;">Type:</span>
+                            <div class="filter-chip ${trainingFilter === 'all' ? 'active' : ''}" onclick="setTrainingFilter('all')">All</div>
+                            <div class="filter-chip ${trainingFilter === 'training' ? 'active' : ''}" onclick="setTrainingFilter('training')">▶ Trainings only</div>
+                            <div class="filter-chip ${trainingFilter === 'task' ? 'active' : ''}" onclick="setTrainingFilter('task')">⬡ Tasks only</div>
+                        </div>
+                        <div class="filter-chips" style="margin-top:6px;">
+                            <span style="font-size:12px;color:var(--text-light);font-weight:500;">Section:</span>
+                            <div class="filter-chip ${ssFilter === 'all' ? 'active' : ''}" onclick="setSsFilter('all')">All Sections</div>
+                            <div class="filter-chip ${ssFilter === 'CC Training' ? 'active' : ''}" onclick="setSsFilter('CC Training')"><span class="ss-pill ss-cc" style="font-size:10px;padding:1px 6px;">CC Training</span></div>
+                            <div class="filter-chip ${ssFilter === 'Retail Sales' ? 'active' : ''}" onclick="setSsFilter('Retail Sales')"><span class="ss-pill ss-retail" style="font-size:10px;padding:1px 6px;">Retail Sales</span></div>
+                            <div class="filter-chip ${ssFilter === 'Field Training' ? 'active' : ''}" onclick="setSsFilter('Field Training')"><span class="ss-pill ss-field" style="font-size:10px;padding:1px 6px;">Field Training</span></div>
+                        </div>
+                        <span class="results-count">${filtered.length} of ${enriched.length} item${enriched.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div class="card-body" style="padding:0;">
+                        ${filtered.length === 0 ? `
+                            <div class="empty-state" style="padding:40px;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                <h3>${q ? `No results for "${q}"` : 'No trainings or tasks'}</h3>
+                                <p>${q ? 'Try a different search term' : 'Add a training or task to get started'}</p>
+                            </div>
+                        ` : `
+                            <div style="overflow-x:auto;">
+                            <table class="data-table" style="border-radius:0;">
+                                <thead>
+                                    <tr>
+                                        ${th('type','Type')}
+                                        ${th('name','Name')}
+                                        ${th('subSection','Sub-Section')}
+                                        ${th('trainer','Trainer')}
+                                        ${th('room','Room')}
+                                        ${th('startDate','Start Date')}
+                                        ${th('endDate','End Date')}
+                                        <th>Days × Hrs/Day</th>
+                                        ${th('totalHours','Total Hours')}
+                                        ${th('status','Status')}
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${filtered.map(t => {
+                                        const trainerLabel = t.trainerId === NO_TRAINER_ID ? '<span style="color:#dc2626;font-weight:600;">⚠ No Trainer</span>' : t.trainer ? t.trainer.name : (t.isTask && !t.trainerId ? '<span style="color:var(--text-light)">—</span>' : '<span style="color:var(--danger)">Deleted</span>');
+                                        const roomLabel    = t.isOnline ? '<span style="color:#0891b2;font-weight:600;">🌐 Online</span>' : t.roomId === NO_ROOM_ID ? '<span style="color:#dc2626;font-weight:600;">⚠ No Room</span>' : t.room ? t.room.name : (t.isTask && !t.roomId ? '<span style="color:var(--text-light)">—</span>' : '<span style="color:var(--danger)">Deleted</span>');
+                                        const statusBadge  = t.hasConflict ? '<span class="badge badge-red">Conflict</span>' : t.isPast ? '<span class="badge badge-green">Completed</span>' : t.isActive ? (t.isTask ? '<span class="badge badge-teal">In Progress</span>' : '<span class="badge badge-orange">In Progress</span>') : (t.isTask ? '<span class="badge badge-teal">Upcoming</span>' : '<span class="badge badge-blue">Upcoming</span>');
+                                        const typePill     = t.isTask ? '<span class="task-type-pill">⬡ Task</span>' : '<span class="training-type-pill">▶ Training</span>';
+                                        const hoursDisplay = `${t.workDays.length}d × ${t.hpd}h`;
+                                        const totalDisplay = t.totalHours % 1 === 0 ? t.totalHours : t.totalHours.toFixed(1);
+                                        const partCount = t.participants ? t.participants.length : 0;
+                                        const participantsButton = t.isTask ? '<span style="color:var(--text-light)">—</span>' : 
+                                            `<button class="btn btn-sm btn-secondary" onclick="openParticipantModal('${t.id}')">👤 ${partCount} <span style="font-weight:bold;margin-left:4px;">+</span></button>`;
+                                        return `<tr class="${t.isTask ? 'row-task' : ''}" style="${t.hasConflict ? 'background:var(--danger-light)' : ''}">
+                                            <td>${typePill}</td>
+                                            <td><strong>${t.name}</strong>${t.hasConflict ? `<button class="conflict-badge" data-id="${t.id}" data-task="${t.isTask}" onmouseenter="hoverConflictBadge(event,this)" onmouseleave="unhoverConflictBadge()" onclick="pinConflictBadge(event,this)">!</button>` : ''}</td>
+                                            <td>${ssLabel(t.subSection)}</td>
+                                            <td>${trainerLabel}</td>
+                                            <td>${roomLabel}</td>
+                                            <td>${formatDisplayDate(t.startDate)}</td>
+                                            <td>${formatDisplayDate(t.endDate)}</td>
+                                            <td><span style="font-family:monospace;font-size:13px;">${hoursDisplay}</span></td>
+                                            <td><strong>${totalDisplay}h</strong></td>
+                                            <td>${statusBadge}</td>
+                                            <td>${participantsButton}</td>
+                                            <td>
+                                                ${isAdmin ? `
+                                                <button class="btn btn-sm btn-secondary" onclick="${t.isTask ? `editTask('${t.id}')` : `editTraining('${t.id}')`}">Edit</button>
+                                                <button class="btn btn-sm btn-danger"    onclick="${t.isTask ? `deleteTask('${t.id}')` : `deleteTraining('${t.id}')`}">Delete</button>
+                                                ` : '<span style="color:var(--text-light);font-size:12px;">View Only</span>'}
+                                            </td>
+                                        </tr>`;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                            </div>
+                        `}
+                    </div>
+                </div>
+            `;
+        }
+
+        window.sortTrainings = function(col) {
+            if (trainingSortCol === col) {
+                trainingSortDir = trainingSortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                trainingSortCol = col;
+                trainingSortDir = 'asc';
+            }
+            renderTrainings();
+        };
+
+        window.setSsFilter = function(ss) { ssFilter = ss; renderTrainings(); };
+
+        window.onTrainingSearch = function(val) {
+            trainingSearch = val;
+            const inp = document.getElementById('training-search-input');
+            const clr = document.getElementById('search-clear-btn');
+            if (inp) inp.value = val;
+            if (clr) clr.classList.toggle('visible', val.length > 0);
+            renderTrainings();
+        };
+
+        window.setTrainingFilter = function(f) {
+            trainingFilter = f;
+            renderTrainings();
+        };
+
+        // ===================== TRAINERS =====================
+        function renderTrainers() {
+            document.getElementById('page-title').textContent = 'Trainers';
+            document.getElementById('content').innerHTML = `
+                <div class="card">
+                    <div class="card-body">
+                        <table class="data-table">
+                            <thead><tr><th>Name</th><th>Expertise</th><th>Color</th><th>Actions</th></tr></thead>
+                            <tbody>
+                                ${data.trainers.map(t => `
+                                    <tr>
+                                        <td><strong>${t.name}</strong></td>
+                                        <td>${t.expertise || '-'}</td>
+                                        <td><span class="color-dot" style="display:inline-block;width:14px;height:14px;border-radius:50%;background:${t.color};vertical-align:middle;margin-right:6px;"></span>${t.color}</td>
+                                        <td>
+                                            ${isAdmin ? `
+                                            <button class="btn btn-sm btn-secondary" onclick="editTrainer('${t.id}')">Edit</button>
+                                            <button class="btn btn-sm btn-danger" onclick="deleteTrainer('${t.id}')">Delete</button>
+                                            ` : '<span style="color:var(--text-light);font-size:12px;">View Only</span>'}
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ===================== ROOMS =====================
+        function renderRooms() {
+            document.getElementById('page-title').textContent = 'Rooms';
+            document.getElementById('content').innerHTML = `
+                <div class="card">
+                    <div class="card-body">
+                        <table class="data-table">
+                            <thead><tr><th>Name</th><th>Capacity</th><th>Color</th><th>Actions</th></tr></thead>
+                            <tbody>
+                                ${data.rooms.map(r => `
+                                    <tr>
+                                        <td><strong>${r.name}</strong></td>
+                                        <td>${r.capacity} people</td>
+                                        <td><span class="color-dot" style="display:inline-block;width:14px;height:14px;border-radius:50%;background:${r.color};vertical-align:middle;margin-right:6px;"></span>${r.color}</td>
+                                        <td>
+                                            ${isAdmin ? `
+                                            <button class="btn btn-sm btn-secondary" onclick="editRoom('${r.id}')">Edit</button>
+                                            <button class="btn btn-sm btn-danger" onclick="deleteRoom('${r.id}')">Delete</button>
+                                            ` : '<span style="color:var(--text-light);font-size:12px;">View Only</span>'}
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ===================== HOLIDAYS =====================
+        function renderHolidays() {
+            document.getElementById('page-title').textContent = 'Public Holidays & Annual Leave';
+            const sorted = [...data.holidays].sort((a, b) => new Date(a.date) - new Date(b.date));
+            const sortedLeaves = [...(data.leaves || [])].sort((a,b) => new Date(a.startDate) - new Date(b.startDate));
+
+            document.getElementById('content').innerHTML = `
+                <!-- Public Holidays -->
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-header">
+                        <span class="card-title">Public Holidays</span>
+                    </div>
+                    <div class="card-body">
+                        ${sorted.length === 0 ? '<div style="color:var(--text-light);font-size:13px;padding:8px 0;">No public holidays added yet.</div>' : `
+                        <table class="data-table">
+                            <thead><tr><th>Holiday Name</th><th>Date</th><th>Day</th><th>Actions</th></tr></thead>
+                            <tbody>
+                                ${sorted.map(h => {
+                                    const d = parseDate(h.date);
+                                    const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
+                                    return `<tr>
+                                        <td><strong>${h.name}</strong></td>
+                                        <td>${formatDisplayDate(h.date)}</td>
+                                        <td>${dayName}</td>
+                                        <td>
+                                            ${isAdmin ? `
+                                            <button class="btn btn-sm btn-secondary" onclick="editHoliday('${h.id}')">Edit</button>
+                                            <button class="btn btn-sm btn-danger" onclick="deleteHoliday('${h.id}')">Delete</button>
+                                            ` : '<span style="color:var(--text-light);font-size:12px;">View Only</span>'}
+                                        </td>
+                                    </tr>`;
+                                }).join('')}
+                            </tbody>
+                        </table>`}
+                    </div>
+                </div>
+
+                <!-- Trainer Annual Leave -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title" style="display:flex;align-items:center;gap:8px;">
+                            <span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:repeating-linear-gradient(45deg,#f59e0b,#f59e0b 4px,#fbbf24 4px,#fbbf24 8px);"></span>
+                            Trainer Annual Leave
+                        </span>
+                        ${isAdmin ? `<button class="btn btn-sm btn-secondary" onclick="openLeaveModal()" style="gap:6px;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            Add Annual Leave
+                        </button>` : ''}
+                    </div>
+                    <div class="card-body">
+                        ${sortedLeaves.length === 0 ? '<div style="color:var(--text-light);font-size:13px;padding:8px 0;">No annual leave recorded yet.</div>' : `
+                        <table class="data-table">
+                            <thead><tr><th>Trainer</th><th>Leave Name / Note</th><th>Start Date</th><th>End Date</th><th>Working Days</th><th>Actions</th></tr></thead>
+                            <tbody>
+                                ${sortedLeaves.map(l => {
+                                    const trainer = data.trainers.find(t => t.id === l.trainerId);
+                                    const days = l.leaveDays ? l.leaveDays.length : 0;
+                                    return `<tr style="background:#fffbeb;">
+                                        <td><strong>${trainer ? trainer.name : '(Deleted)'}</strong></td>
+                                        <td>${l.name || '—'}</td>
+                                        <td>${formatDisplayDate(l.startDate)}</td>
+                                        <td>${formatDisplayDate(l.endDate)}</td>
+                                        <td><span class="badge badge-amber">${days} day(s)</span></td>
+                                        <td>
+                                            ${isAdmin ? `
+                                            <button class="btn btn-sm btn-secondary" onclick="editLeave('${l.id}')">Edit</button>
+                                            <button class="btn btn-sm btn-danger" onclick="deleteLeave('${l.id}')">Delete</button>
+                                            ` : '<span style="color:var(--text-light);font-size:12px;">View Only</span>'}
+                                        </td>
+                                    </tr>`;
+                                }).join('')}
+                            </tbody>
+                        </table>`}
+                    </div>
+                </div>
+            `;
+        }
+
+        // ===================== GANTT CHART =====================
+        function renderGantt() {
+            document.getElementById('page-title').textContent = 'Gantt View';
+
+            if (data.trainings.length === 0 && data.tasks.length === 0) {
+                document.getElementById('content').innerHTML = `
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+                        <h3>No trainings to display</h3>
+                        <p>Add trainings to see the Gantt chart</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Calculate full data date range for defaults
+            const allDates = [...data.trainings, ...data.tasks, ...(data.leaves||[])].flatMap(t => [new Date(t.startDate), new Date(t.endDate)]);
+            let fullMin = new Date(Math.min(...allDates));
+            let fullMax = new Date(Math.max(...allDates));
+            fullMin.setDate(fullMin.getDate() - 7);
+            fullMax.setDate(fullMax.getDate() + 7);
+
+            // Apply filter if set, else use full range
+            let minDate = ganttFilterFrom ? new Date(ganttFilterFrom) : new Date(fullMin);
+            let maxDate = ganttFilterTo   ? new Date(ganttFilterTo)   : new Date(fullMax);
+
+            // Ensure at least 14 days visible
+            if ((maxDate - minDate) / 86400000 < 14) {
+                maxDate.setDate(maxDate.getDate() + 14);
+            }
+
+            const days = [];
+            let cur = new Date(minDate);
+            while (cur <= maxDate) {
+                days.push(new Date(cur));
+                cur.setDate(cur.getDate() + 1);
+            }
+
+            const entities = ganttView === 'trainers' ? data.trainers : ganttView === 'rooms' ? data.rooms : null;
+            const entityType = ganttView === 'trainers' ? 'trainerId' : 'roomId';
+
+            const legendHtml = `
+                <div class="gantt-legend">
+                    <div class="legend-item"><div class="legend-box" style="background:#dbeafe;border-bottom:2px solid #2563eb;"></div> Today</div>
+                    <div class="legend-item"><div class="legend-box" style="background:repeating-linear-gradient(45deg, #e2e9f3, #e2e9f3 4px, #cdd6e8 4px, #cdd6e8 8px);"></div> Weekend</div>
+                    <div class="legend-item"><div class="legend-box" style="background:var(--danger-light);"></div> Public Holiday</div>
+                    <div class="legend-item"><div class="legend-box" style="background:var(--primary);"></div> Training</div>
+                    <div class="legend-item"><div class="legend-box" style="background:#14b8a6;border:2px dashed rgba(255,255,255,0.6);"></div> Resource Task</div>
+                    <div class="legend-item"><div class="legend-box" style="background:var(--primary);border:2px dashed rgba(255,255,255,0.7);"></div> Online Session</div>
+                    <div class="legend-item"><div class="legend-box" style="background:repeating-linear-gradient(45deg,#f59e0b,#f59e0b 4px,#fbbf24 4px,#fbbf24 8px);"></div> Annual Leave</div>
+                    <div class="legend-item"><div class="legend-box" style="background:var(--primary);border:2px solid var(--danger);"></div> Conflict Detected</div>
+                    <div class="legend-item"><div class="legend-box" style="background:#dc2626;"></div> Unassigned Batch</div>
+                </div>`;
+
+            // Quick-range helpers
+            const todayStr = formatDate(new Date());
+            const thisMonthStart = formatDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+            const thisMonthEnd   = formatDate(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0));
+            const next3Start = todayStr;
+            const next3End   = formatDate(new Date(new Date().setMonth(new Date().getMonth() + 3)));
+
+            // Toolbar is shared by all three views — declared here so Activities can use it
+            let html = `
+                <div class="gantt-container">
+                    <div class="gantt-toolbar" style="flex-wrap:wrap;gap:10px;">
+                        <div class="gantt-view-toggle">
+                            <button class="${ganttView === 'trainers' ? 'active' : ''}" onclick="setGanttView('trainers')">Trainers</button>
+                            <button class="${ganttView === 'rooms' ? 'active' : ''}" onclick="setGanttView('rooms')">Rooms</button>
+                            <button class="${ganttView === 'activities' ? 'active' : ''}" onclick="setGanttView('activities')">Activities</button>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <label style="font-size:12px;color:var(--text-light);font-weight:500;">Section:</label>
+                            <select onchange="setGanttSsFilter(this.value)"
+                                style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);">
+                                <option value="all" ${ganttSsFilter==='all'?'selected':''}>All Sections</option>
+                                ${SUB_SECTIONS.map(s => `<option value="${s}" ${ganttSsFilter===s?'selected':''}>${s}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                            <label style="font-size:12px;color:var(--text-light);font-weight:500;">From</label>
+                            <input type="date" id="gantt-from" value="${ganttFilterFrom || formatDate(fullMin)}"
+                                style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);"
+                                onchange="applyGanttFilter()">
+                            <label style="font-size:12px;color:var(--text-light);font-weight:500;">To</label>
+                            <input type="date" id="gantt-to" value="${ganttFilterTo || formatDate(fullMax)}"
+                                style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);"
+                                onchange="applyGanttFilter()">
+                            <button class="btn btn-sm btn-secondary" onclick="jumpGanttToday()" title="Jump to today">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                Today
+                            </button>
+                            <button class="btn btn-sm btn-secondary" onclick="setGanttRange('${thisMonthStart}','${thisMonthEnd}')">This Month</button>
+                            <button class="btn btn-sm btn-secondary" onclick="setGanttRange('${next3Start}','${next3End}')">Next 3 Months</button>
+                            <button class="btn btn-sm btn-secondary" onclick="setGanttRange('${formatDate(fullMin)}','${formatDate(fullMax)}')">All</button>
+                        </div>
+                    </div>`;
+
+            // ---- ACTIVITIES VIEW ----
+            if (ganttView === 'activities') {
+                const actItems = [
+                    ...data.trainings.map(t => ({...t, _type:'training'})),
+                    ...data.tasks.map(t => ({...t, _type:'task'}))
+                ].sort((a,b) => new Date(a.startDate) - new Date(b.startDate));
+
+                const labelCol = actItems.map(t => {
+                    const isTask = t._type === 'task';
+                    const trainer = t.trainerId && t.trainerId !== NO_TRAINER_ID ? data.trainers.find(tr=>tr.id===t.trainerId) : null;
+                    const room    = t.isOnline ? null : (t.roomId && t.roomId !== NO_ROOM_ID ? data.rooms.find(r=>r.id===t.roomId) : null);
+                    const trainerSub = t.trainerId === NO_TRAINER_ID ? '⚠ No Trainer' : (trainer ? trainer.name : '—');
+                    const roomSub    = t.isOnline ? '🌐 Online' : (t.roomId === NO_ROOM_ID ? '⚠ No Room' : (room ? room.name : '—'));
+                    const pill = isTask ? '⬡' : '▶';
+                    return `<div class="gantt-label gantt-label-activity">
+                        <span class="act-name">${pill} ${t.name}</span>
+                        <span class="act-sub">${trainerSub} · ${roomSub}</span>
+                    </div>`;
+                }).join('');
+
+                const timelineRows = actItems.map(t => {
+                    const isTask = t._type === 'task';
+                    const conflicts = isTask ? [] : checkConflicts(t);
+                    const hasConflict = conflicts.length > 0;
+                    const workDays = getTrainingWorkingDays(t);
+                    const startIdx = days.findIndex(d => formatDate(d) === t.startDate);
+                    const endIdx   = days.findIndex(d => formatDate(d) === t.endDate);
+                    const si = startIdx === -1 ? 0 : startIdx;
+                    const ei = endIdx   === -1 ? days.length - 1 : endIdx;
+                    const width = (ei - si + 1) * 44;
+                    const left  = si * 44;
+                    const isOnline = t.isOnline;
+                    const barClass = isTask ? 'gantt-bar' : `gantt-bar${isOnline ? ' gantt-bar-online' : ''} ${hasConflict ? 'conflict' : ''}`;
+                    const hpd = t.hoursPerDay || 8;
+                    const cellsHtml = days.map(d => {
+                        const isWknd = isWeekend(d); const isHoli = isHoliday(d);
+                        const isToday = formatDate(d) === formatDate(new Date());
+                        const hasOvr = (t.includedDates||[]).includes(formatDate(d));
+                        const cls = [(isWknd && !hasOvr ? 'weekend' : ''), (isHoli && !hasOvr ? 'holiday' : '')].filter(Boolean).join(' ');
+                        const s = isToday ? 'border-left:2px solid #2563eb;background:rgba(37,99,235,0.07)!important;' : (hasOvr && (isWknd||isHoli) ? 'background:rgba(37,99,235,0.08);' : '');
+                        return `<div class="gantt-cell ${cls}" style="${s}"></div>`;
+                    }).join('');
+                    const barHtml = (startIdx !== -1 && endIdx !== -1) ? `
+                        <div class="${barClass}"
+                            style="left:${left}px;width:${width}px;background:${t.color || '#2563eb'};cursor:${isAdmin ? 'pointer' : 'default'};"
+                            onmouseenter="showTooltip(event,'${(isOnline?'🌐 ':'') + t.name}')"
+                            onmouseleave="hideTooltip()"
+                            onclick="${isAdmin ? `${isTask ? `editTask('${t.id}')` : `editTraining('${t.id}')`}` : ''}">
+                            ${width > 80 ? (isOnline?'🌐 ':'') + t.name : ''}
+                        </div>` : '';
+                    return `<div class="gantt-row">${cellsHtml}${barHtml}</div>`;
+                }).join('');
+
+                html += `
+                    <div class="gantt-scroll-area">
+                        <div class="gantt-chart">
+                            <div class="gantt-labels">
+                                <div class="gantt-label-header">Activity</div>
+                                ${labelCol}
+                            </div>
+                            <div class="gantt-timeline">
+                                <div class="gantt-timeline-header">
+                                    ${days.map(d => {
+                                        const isWknd = isWeekend(d); const isHoli = isHoliday(d);
+                                        const isToday = formatDate(d) === formatDate(new Date());
+                                        const cls = [isWknd?'weekend':'', isHoli?'holiday':''].filter(Boolean).join(' ');
+                                        return `<div class="gantt-day-header ${cls}" data-date-key="${formatDate(d)}" ${isToday ? 'style="background:#dbeafe;color:#1d4ed8;font-weight:800;border-bottom:2px solid #2563eb;"':''}>
+                                            <span class="day-num">${d.getDate()}</span>
+                                            <span class="day-name">${d.toLocaleDateString('en-US',{month:'short'})}</span>
+                                        </div>`;
+                                    }).join('')}
+                                </div>
+                                ${timelineRows}
+                            </div>
+                        </div>
+                    </div>
+                    ${legendHtml}
+                </div>`;
+                document.getElementById('content').innerHTML = html;
+                return;
+            }
+
+            // ---- TRAINERS / ROOMS VIEW ----
+            html += `<div class="gantt-scroll-area">
+                        <div class="gantt-chart">
+                            <div class="gantt-labels">
+                                <div class="gantt-label-header">${ganttView === 'trainers' ? 'Trainer' : 'Room'}</div>
+                                ${entities.map(e => `
+                                    <div class="gantt-label">
+                                        <span class="color-dot" style="background:${e.color}"></span>
+                                        ${e.name}
+                                    </div>
+                                `).join('')}
+                                ${(() => {
+                                    const sentinelId = ganttView === 'trainers' ? NO_TRAINER_ID : NO_ROOM_ID;
+                                    const unassigned = data.trainings.filter(t => t[entityType] === sentinelId);
+                                    return unassigned.length > 0 ? `
+                                        <div class="gantt-label" style="background:#fef2f2;border-left:3px solid #dc2626;">
+                                            <span style="color:#dc2626;font-size:11px;font-weight:700;">⚠ Unassigned</span>
+                                        </div>` : '';
+                                })()}
+                            </div>
+                            <div class="gantt-timeline">
+                                <div class="gantt-timeline-header">
+                                    ${days.map(d => {
+                                        const isWknd = isWeekend(d);
+                                        const isHoli = isHoliday(d);
+                                        const isToday = formatDate(d) === formatDate(new Date());
+                                        const classes = [];
+                                        if (isWknd) classes.push('weekend');
+                                        if (isHoli) classes.push('holiday');
+                                        return `<div class="gantt-day-header ${classes.join(' ')}" data-date-key="${formatDate(d)}" title="${isHoli ? getHolidayName(d) : ''}" ${isToday ? 'style="background:#dbeafe;color:#1d4ed8;font-weight:800;border-bottom:2px solid #2563eb;"' : ''}>
+                                            <span class="day-weekday">${d.toLocaleDateString('en-US', { weekday: 'short' })}</span>
+                                            <span class="day-num">${d.getDate()}</span>
+                                            <span class="day-name">${d.toLocaleDateString('en-US', { month: 'short' })}</span>
+                                        </div>`;
+                                    }).join('')}
+                                </div>
+                                ${entities.map(e => {
+                                    const entityTrainings = data.trainings.filter(t =>
+                                        t[entityType] === e.id &&
+                                        (ganttSsFilter === 'all' || t.subSection === ganttSsFilter)
+                                    );
+                                    return `<div class="gantt-row">
+                                    ${days.map(d => {
+                                            const isWknd = isWeekend(d);
+                                            const isHoli = isHoliday(d);
+                                            const dayKey = formatDate(d);
+                                            const isToday = dayKey === formatDate(new Date());
+                                            // Check if any training for this entity has this day overridden
+                                            const hasOverride = entityTrainings.some(t =>
+                                                (t.includedDates || []).includes(dayKey)
+                                            );
+                                            const classes = [];
+                                            if (isWknd && !hasOverride) classes.push('weekend');
+                                            if (isHoli && !hasOverride) classes.push('holiday');
+                                            let extraStyle = '';
+                                            if (isToday) extraStyle = 'border-left:2px solid #2563eb;background:rgba(37,99,235,0.07)!important;';
+                                            else if (hasOverride && (isWknd || isHoli)) extraStyle = 'background:rgba(37,99,235,0.08);';
+                                            return `<div class="gantt-cell ${classes.join(' ')}" style="${extraStyle}"></div>`;
+                                        }).join('')}
+                                        ${entityTrainings.map(t => {
+                                            const startIdx = days.findIndex(d => formatDate(d) === t.startDate);
+                                            const endIdx = days.findIndex(d => formatDate(d) === t.endDate);
+                                            if (startIdx === -1 || endIdx === -1) return '';
+                                            const conflicts = checkConflicts(t);
+                                            const hasConflict = conflicts.length > 0;
+                                            const workDays = getTrainingWorkingDays(t);
+                                            const width = (endIdx - startIdx + 1) * 44;
+                                            const left = startIdx * 44;
+                                            const isOnline = t.isOnline;
+                                            const barClass = isOnline ? 'gantt-bar gantt-bar-online' : `gantt-bar ${hasConflict ? 'conflict' : ''}`;
+                                            const onlineIcon = isOnline ? '🌐 ' : '';
+                                            return `<div class="${barClass}"
+                                                data-training-id="${t.id}"
+                                                style="left:${left}px;width:${width}px;background:${t.color || e.color};cursor:${isAdmin ? 'grab' : 'default'};"
+                                                onmouseenter="showTooltip(event, '${isOnline ? '🌐 ' : ''}${t.name.replace(/'/g,"&#39;")}${hasConflict ? ' ⚠' : ''}')"
+                                                onmouseleave="hideTooltip()"
+                                                onclick="${isAdmin ? `editTraining('${t.id}')` : ''}">
+                                                ${width > 80 ? onlineIcon + t.name : (isOnline ? '🌐' : '')}
+                                            </div>`;
+                                        }).join('')}
+                                        ${ganttView === 'trainers' ? (data.leaves || []).filter(l => l.trainerId === e.id).map(l => {
+                                            const startIdx = days.findIndex(d => formatDate(d) === l.startDate);
+                                            const endIdx   = days.findIndex(d => formatDate(d) === l.endDate);
+                                            if (startIdx === -1 && endIdx === -1) return '';
+                                            const si = startIdx === -1 ? 0 : startIdx;
+                                            const ei = endIdx   === -1 ? days.length - 1 : endIdx;
+                                            const width = (ei - si + 1) * 44;
+                                            const left  = si * 44;
+                                            const days2 = l.leaveDays ? l.leaveDays.length : 0;
+                                            return `<div class="gantt-bar gantt-bar-leave"
+                                                style="left:${left}px;width:${width}px;top:6px;height:calc(100% - 12px);cursor:${isAdmin ? 'pointer' : 'default'};"
+                                                onmouseenter="showTooltip(event, '🏖 ${l.name || 'Annual Leave'}${isAdmin ? '\n(click to edit)' : ''}')"
+                                                onmouseleave="hideTooltip()"
+                                                onclick="${isAdmin ? `editLeave('${l.id}')` : ''}">
+                                                ${width > 60 ? '🏖 ' + (l.name || 'Leave') : '🏖'}
+                                            </div>`;
+                                        }).join('') : ''}
+                                        ${(ganttView === 'trainers' ? data.tasks.filter(t => t.trainerId === e.id) : data.tasks.filter(t => t.roomId === e.id)).map(t => {
+                                            const startIdx = days.findIndex(d => formatDate(d) === t.startDate);
+                                            const endIdx = days.findIndex(d => formatDate(d) === t.endDate);
+                                            if (startIdx === -1 || endIdx === -1) return '';
+                                            const workDays = getTrainingWorkingDays(t);
+                                            const width = (endIdx - startIdx + 1) * 44;
+                                            const left = startIdx * 44;
+                                            return `<div class="gantt-bar" 
+                                                style="left:${left}px;width:${width}px;background:${t.color || '#14b8a6'};opacity:0.85;border:2px dashed rgba(255,255,255,0.6);top:6px;height:calc(100% - 12px);cursor:${isAdmin ? 'pointer' : 'default'};"
+                                                onmouseenter="showTooltip(event, '⬡ ${t.name}')"
+                                                onmouseleave="hideTooltip()"
+                                                onclick="${isAdmin ? `editTask('${t.id}')` : ''}">
+                                                ${width > 80 ? '⬡ ' + t.name : ''}
+                                            </div>`;
+                                        }).join('')}
+                                    </div>`;
+                                }).join('')}
+                                ${(() => {
+                                    const sentinelId = ganttView === 'trainers' ? NO_TRAINER_ID : NO_ROOM_ID;
+                                    const unassignedTrainings = data.trainings.filter(t => t[entityType] === sentinelId);
+                                    if (unassignedTrainings.length === 0) return '';
+                                    const cellsHtml = days.map(d => {
+                                        const isWknd = isWeekend(d); const isHoli = isHoliday(d);
+                                        const isToday = formatDate(d) === formatDate(new Date());
+                                        const classes = [];
+                                        if (isWknd) classes.push('weekend'); if (isHoli) classes.push('holiday');
+                                        const s = isToday ? 'border-left:2px solid #2563eb;background:rgba(37,99,235,0.07)!important;' : '';
+                                        return `<div class="gantt-cell ${classes.join(' ')}" style="${s}"></div>`;
+                                    }).join('');
+                                    const barsHtml = unassignedTrainings.map(t => {
+                                        const startIdx = days.findIndex(d => formatDate(d) === t.startDate);
+                                        const endIdx   = days.findIndex(d => formatDate(d) === t.endDate);
+                                        if (startIdx === -1 || endIdx === -1) return '';
+                                        const width = (endIdx - startIdx + 1) * 44;
+                                        const left  = startIdx * 44;
+                                        const workDays = getTrainingWorkingDays(t);
+                                        return `<div class="gantt-bar conflict"
+                                            style="left:${left}px;width:${width}px;background:#dc2626;cursor:${isAdmin ? 'pointer' : 'default'};"
+                                            onmouseenter="showTooltip(event, '⚠ ${t.name}')"
+                                            onmouseleave="hideTooltip()"
+                                            onclick="${isAdmin ? `editTraining('${t.id}')` : ''}">
+                                            ${width > 60 ? '⚠ ' + t.name : '⚠'}
+                                        </div>`;
+                                    }).join('');
+                                    return `<div class="gantt-row" style="background:#fff5f5;">${cellsHtml}${barsHtml}</div>`;
+                                })()}
+                            </div>
+                        </div>
+                    </div>
+                    ${legendHtml}
+                </div>
+            `;
+
+            document.getElementById('content').innerHTML = html;
+
+            // Attach drag-and-drop to training bars (Admin only, Trainers/Rooms view)
+            if (isAdmin && ganttView !== 'activities') {
+                document.querySelectorAll('.gantt-bar[data-training-id]').forEach(barEl => {
+                    const tid = barEl.dataset.trainingId;
+                    const isTask = data.tasks.some(t => t.id === tid);
+                    attachDragListeners(barEl, tid, isTask);
+                });
+            }
+        }
+
+        function setGanttView(view) {
+            ganttView = view;
+            renderGantt();
+        }
+
+        window.setGanttSsFilter = function(ss) { ganttSsFilter = ss; renderGantt(); };
+
+        function applyGanttFilter() {
+            ganttFilterFrom = document.getElementById('gantt-from')?.value || '';
+            ganttFilterTo   = document.getElementById('gantt-to')?.value || '';
+            renderGantt();
+        }
+
+        function setGanttRange(from, to) {
+            ganttFilterFrom = from;
+            ganttFilterTo   = to;
+            renderGantt();
+            // Scroll to start of range
+            setTimeout(() => {
+                const scroll = document.querySelector('.gantt-scroll-area');
+                if (scroll) scroll.scrollLeft = 0;
+            }, 50);
+        }
+
+        function jumpGanttToday() {
+            const today = new Date();
+            const from = new Date(today); from.setDate(today.getDate() - 7);
+            const to   = new Date(today); to.setDate(today.getDate() + 30);
+            ganttFilterFrom = formatDate(from);
+            ganttFilterTo   = formatDate(to);
+            renderGantt();
+            // Scroll the today column into view
+            setTimeout(() => {
+                const scroll = document.querySelector('.gantt-scroll-area');
+                const todayHeader = document.querySelector('.gantt-day-header[style*="1d4ed8"]');
+                if (scroll && todayHeader) {
+                    scroll.scrollLeft = Math.max(0, todayHeader.offsetLeft - 200);
+                }
+            }, 80);
+        }
+
+        // ===================== MODAL SYSTEM =====================
+        function openModal(title, bodyHtml, onSave) {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-body').innerHTML = bodyHtml;
+            document.getElementById('modal').classList.add('active');
+            modalCallback = onSave;
+            // Always restore the Save button — PIN modal hides it, but subsequent modals must show it
+            const saveBtn = document.getElementById('modal-save');
+            saveBtn.style.display = 'inline-flex';
+            saveBtn.textContent = 'Save';
+        }
+
+        function closeModal() {
+            document.getElementById('modal').classList.remove('active');
+            modalCallback = null;
+            editingId = null;
+            window._updatePreviewFn = null;
+        }
+
+        function saveModal() {
+            if (modalCallback) modalCallback();
+        }
+
+        function openAddModal() {
+            switch(currentPage) {
+                case 'trainings': openTrainingModal(); break;
+                case 'trainers': openTrainerModal(); break;
+                case 'rooms': openRoomModal(); break;
+                case 'holidays': openHolidayModal(); break;
+            }
+        }
+
+        // ===================== TRAINING MODAL =====================
+        
+        // ===================== AUTO-SUGGEST ENGINE =====================
+        function autoSuggestResources() {
+            try {
+                const nameField = document.getElementById('t-name').value.toLowerCase().trim();
+                const startStr = document.getElementById('t-start').value;
+                const duration = parseInt(document.getElementById('t-duration').value) || 0;
+                const isOnline = document.getElementById('t-online').checked;
+
+                if (!startStr || duration <= 0) {
+                    showToast("⚠ Please set a Start Date and Duration first.", true);
+                    return;
+                }
+
+                const includedDates = Array.from(document.querySelectorAll('.override-day-chip.selected input')).map(cb => cb.value);
+                
+                const days = [];
+                let current = new Date(startStr);
+                const includedSet = new Set(includedDates);
+                let count = 0;
+                
+                let maxLoops = 365;
+                while (count < duration && maxLoops > 0) {
+                    const key = formatDate(current);
+                    if (isWorkingDay(current) || includedSet.has(key)) {
+                        days.push(key);
+                        count++;
+                    }
+                    if (count < duration) current.setDate(current.getDate() + 1);
+                    maxLoops--;
+                }
+
+                // 1. Suggest Trainer
+                let bestTrainer = null;
+                let bestTrainerScore = -1;
+
+                (data.trainers || []).forEach(trainer => {
+                    const occupied = getOccupiedDates('trainer', trainer.id, editingId);
+                    let isFree = true;
+                    days.forEach(d => { if (occupied.has(d)) isFree = false; });
+                    
+                    const leaves = (data.leaves || []).filter(l => l.trainerId === trainer.id);
+                    days.forEach(d => {
+                        leaves.forEach(l => {
+                            if (l.leaveDays && l.leaveDays.includes(d)) isFree = false;
+                        });
+                    });
+
+                    if (isFree) {
+                        let score = 0;
+                        if (trainer.expertise && nameField) {
+                            const keywords = trainer.expertise.toLowerCase().split(',').map(s => s.trim());
+                            keywords.forEach(kw => {
+                                if (kw && nameField.includes(kw)) score += 10;
+                            });
+                        }
+                        if (score > bestTrainerScore) {
+                            bestTrainerScore = score;
+                            bestTrainer = trainer;
+                        }
+                    }
+                });
+
+                // 2. Suggest Room
+                let bestRoom = null;
+                if (!isOnline) {
+                    (data.rooms || []).forEach(room => {
+                        const occupied = getOccupiedDates('room', room.id, editingId);
+                        let isFree = true;
+                        days.forEach(d => { if (occupied.has(d)) isFree = false; });
+                        
+                        if (isFree) {
+                            if (!bestRoom || parseInt(room.capacity) < parseInt(bestRoom.capacity)) {
+                                bestRoom = room;
+                            }
+                        }
+                    });
+                }
+
+                // Apply suggestions
+                let msg = [];
+                if (bestTrainer) {
+                    document.getElementById('t-trainer').value = bestTrainer.id;
+                    msg.push(`Trainer: ${bestTrainer.name}`);
+                } else {
+                    msg.push(`Trainer: None free`);
+                }
+
+                if (!isOnline) {
+                    if (bestRoom) {
+                        document.getElementById('t-room').value = bestRoom.id;
+                        msg.push(`Room: ${bestRoom.name}`);
+                    } else {
+                        msg.push(`Room: None free`);
+                    }
+                }
+
+                showToast("✨ Auto-Suggested: " + msg.join(" | "));
+            } catch(e) {
+                console.error(e);
+                alert("Error in Auto-Suggest: " + e.message);
+            }
+        }
+
+        function openTrainingModal(training = null) {
+            const isEdit = !!training;
+            editingId = training ? training.id : null;
+
+            const trainerOptions = data.trainers.map(t => `<option value="${t.id}" ${training && training.trainerId === t.id ? 'selected' : ''}>${t.name}</option>`).join('');
+            const roomOptions = data.rooms.map(r => `<option value="${r.id}" ${training && training.roomId === r.id ? 'selected' : ''}>${r.name}</option>`).join('');
+
+            const today = formatDate(new Date());
+
+            openModal(
+                isEdit ? 'Edit Training' : 'Schedule New Training',
+                `
+                    <div class="alert alert-danger" id="training-alert"></div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Training Name *</label>
+                            <input type="text" id="t-name" value="${training ? training.name : ''}" placeholder="e.g., Advanced Data Science">
+                            <div class="form-error">Training name is required</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Sub-Section *</label>
+                            <select id="t-subsection">
+                                <option value="">Select Sub-Section</option>
+                                ${SUB_SECTIONS.map(s => `<option value="${s}" ${training && training.subSection === s ? 'selected' : ''}>${s}</option>`).join('')}
+                            </select>
+                            <div class="form-error">Please select a sub-section</div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                            <input type="checkbox" id="t-online" ${training && training.isOnline ? 'checked' : ''} onchange="toggleOnlineMode(this.checked)" style="width:16px;height:16px;cursor:pointer;">
+                            <span>🌐 Online Session <span style="font-size:12px;color:var(--text-light);font-weight:400;">— no room required, room conflicts bypassed</span></span>
+                        </label>
+                    </div>
+                    <div class="form-row">
+                        <div style="width:100%; display:flex; justify-content:flex-end; margin-bottom:8px;">
+                            <button type="button" class="btn btn-sm" style="background:#fef08a; color:#854d0e; border:1px solid #fde047; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.05);" onclick="autoSuggestResources()">
+                                ✨ Auto-Suggest Trainer & Room
+                            </button>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Trainer *</label>
+                            <select id="t-trainer">
+                                <option value="">Select Trainer</option>
+                                ${trainerOptions}
+                            </select>
+                            <div class="form-error">Please select a trainer</div>
+                        </div>
+                        <div class="form-group" id="t-room-group" ${training && training.isOnline ? 'style="opacity:0.4;pointer-events:none;"' : ''}>
+                            <label>Room ${training && training.isOnline ? '<span style="color:var(--text-light);font-weight:400;">(Online — not required)</span>' : '*'}</label>
+                            <select id="t-room" ${training && training.isOnline ? 'disabled' : ''}>
+                                <option value="">Select Room</option>
+                                ${roomOptions}
+                            </select>
+                            <div class="form-error">Please select a room</div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Start Date *</label>
+                            <input type="date" id="t-start" value="${training ? training.startDate : today}">
+                            <div class="form-error">Start date is required</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Duration (Working Days) *</label>
+                            <input type="number" id="t-duration" min="1" value="${training ? getTrainingWorkingDays(training).length : '5'}">
+                            <div class="form-hint">Excludes weekends &amp; holidays (override below if needed)</div>
+                            <div class="form-error">Duration must be at least 1 working day</div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Hours per Day</label>
+                            <select id="t-hours">
+                                ${[1,1.5,2,2.5,3,3.5,4,4.5,5,5.5,6,6.5,7,7.5,8].map(h =>
+                                    `<option value="${h}" ${(training ? (training.hoursPerDay || 8) : 8) == h ? 'selected' : ''}>${h}h${h < 8 ? (h <= 4 ? ' (half day or less)' : ' (partial day)') : ' (full day)'}</option>`
+                                ).join('')}
+                            </select>
+                            <div class="form-hint">Used to calculate total training hours</div>
+                        </div>
+                        <div class="form-group" style="display:flex;align-items:flex-end;">
+                            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--radius);padding:10px 14px;width:100%;font-size:13px;" id="hours-summary">
+                                <span style="color:var(--text-light);">Total hours will show here</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Color</label>
+                        ${buildColorPicker('t-color', training ? training.color : COLORS[0])}
+                    </div>
+                    <div id="preview-dates" style="margin-top:12px;padding:12px;background:#f8fafc;border-radius:6px;font-size:13px;"></div>
+                    <div id="override-container"></div>
+                `,
+                () => saveTraining()
+            );
+
+            // Track whether this is the first render (seed from saved data once only)
+            let overrideInitialised = false;
+
+            // Add live preview + override day picker
+            const updatePreview = () => {
+                const start = document.getElementById('t-start').value;
+                const duration = parseInt(document.getElementById('t-duration').value) || 0;
+                const hpd = parseFloat(document.getElementById('t-hours').value) || 8;
+                const preview = document.getElementById('preview-dates');
+                const hoursSummary = document.getElementById('hours-summary');
+                const overrideContainer = document.getElementById('override-container');
+
+                if (start && duration > 0) {
+                    // Get currently selected overrides to preserve across re-renders
+                    const currentOverrides = new Set(
+                        [...document.querySelectorAll('.override-day-chip.selected')].map(c => c.dataset.date)
+                    );
+                    // Seed from saved includedDates only on the very first render —
+                    // after that the chips themselves are the source of truth, so
+                    // deselecting a chip is respected instead of being overwritten.
+                    if (!overrideInitialised) {
+                        if (training && training.includedDates) training.includedDates.forEach(d => currentOverrides.add(d));
+                        overrideInitialised = true;
+                    }
+
+                    const end = addWorkingDays(start, duration - 1, [...currentOverrides]);
+                    const workDays = getWorkingDaysBetween(start, end);
+
+                    // Collect skipped days (weekends + holidays in range)
+                    const skippedWeekends = [], skippedHolidays = [];
+                    let cur = new Date(start);
+                    const endD = new Date(end);
+                    while (cur <= endD) {
+                        const key = formatDate(cur);
+                        if (isWeekend(cur) && !currentOverrides.has(key)) skippedWeekends.push(new Date(cur));
+                        if (isHoliday(cur) && !currentOverrides.has(key)) skippedHolidays.push({ date: new Date(cur), key, name: getHolidayName(cur) });
+                        cur.setDate(cur.getDate() + 1);
+                    }
+
+                    // Recalculate with overrides included in working days
+                    const includedExtra = [...currentOverrides].filter(k => {
+                        const d = new Date(k);
+                        return isWeekend(d) || isHoliday(d);
+                    });
+                    const totalWorkDays = workDays.length + includedExtra.length;
+                    const totalHours = totalWorkDays * hpd;
+
+                    let html = `<strong>Preview:</strong> ${formatDisplayDate(start)} → ${formatDisplayDate(end)}<br>`;
+                    html += `<span style="color:var(--success)">✓ ${workDays.length} working day(s)`;
+                    if (includedExtra.length > 0) html += ` + ${includedExtra.length} override day(s) = <strong>${totalWorkDays} total days</strong>`;
+                    html += ` × ${hpd}h = <strong>${totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1)} total hours</strong></span>`;
+                    if (skippedWeekends.length > 0) html += `<br><span style="color:var(--text-light)">↷ ${skippedWeekends.length} weekend day(s) skipped</span>`;
+                    if (skippedHolidays.length > 0) html += `<br><span style="color:var(--danger)">↷ ${skippedHolidays.length} holiday(s) skipped: ${skippedHolidays.map(h => h.name).join(', ')}</span>`;
+                    preview.innerHTML = html;
+                    hoursSummary.innerHTML = `<strong style="color:#16a34a;font-size:16px;">${totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1)}h</strong> total<br><span style="color:var(--text-light);font-size:11px;">${totalWorkDays} days × ${hpd}h/day</span>`;
+
+                    // Build override section — scan the FULL range including overrides,
+                    // so previously-included days still appear as chips and can be deselected.
+                    const allSkippable = [];
+                    const scanEnd = addWorkingDays(start, duration - 1, [...currentOverrides]);
+                    let scanCur = new Date(start);
+                    while (scanCur <= new Date(scanEnd)) {
+                        const key = formatDate(scanCur);
+                        if (isWeekend(scanCur)) {
+                            allSkippable.push({ key, label: scanCur.toLocaleDateString('en-GB', { weekday:'short', day:'2-digit', month:'short' }), type: 'weekend' });
+                        } else if (isHoliday(scanCur)) {
+                            allSkippable.push({ key, label: `${getHolidayName(scanCur)} (${scanCur.toLocaleDateString('en-GB', { day:'2-digit', month:'short' })})`, type: 'holiday' });
+                        }
+                        scanCur.setDate(scanCur.getDate() + 1);
+                    }
+
+                    if (allSkippable.length > 0) {
+                        overrideContainer.innerHTML = `
+                            <div class="override-section">
+                                <div class="override-section-title">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                                    Include non-working days? <span style="font-weight:400;color:#a16207;">Tap to include as working days for this training.</span>
+                                </div>
+                                <div class="override-days-grid">
+                                    ${allSkippable.map(s => `
+                                        <div class="override-day-chip ${s.type}-chip ${currentOverrides.has(s.key) ? 'selected' : ''}"
+                                            data-date="${s.key}"
+                                            onclick="toggleOverrideDay(this)">
+                                            ${s.type === 'weekend' ? '📅' : '🏖️'} ${s.label}
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>`;
+                    } else {
+                        overrideContainer.innerHTML = '';
+                    }
+                } else {
+                    preview.innerHTML = '';
+                    hoursSummary.innerHTML = '<span style="color:var(--text-light);">Total hours will show here</span>';
+                    overrideContainer.innerHTML = '';
+                }
+            };
+
+            document.getElementById('t-start').addEventListener('change', () => { overrideInitialised = false; updatePreview(); });
+            document.getElementById('t-duration').addEventListener('input', () => { overrideInitialised = false; updatePreview(); });
+            document.getElementById('t-hours').addEventListener('change', updatePreview);
+            window._updatePreviewFn = updatePreview;
+            updatePreview();
+        }
+
+        window.toggleOnlineMode = function(isOnline) {
+            const roomGroup = document.getElementById('t-room-group');
+            const roomSel   = document.getElementById('t-room');
+            const roomLabel = roomGroup?.querySelector('label');
+            if (roomGroup) {
+                roomGroup.style.opacity = isOnline ? '0.4' : '1';
+                roomGroup.style.pointerEvents = isOnline ? 'none' : '';
+            }
+            if (roomSel) roomSel.disabled = isOnline;
+            if (roomLabel) roomLabel.innerHTML = isOnline
+                ? 'Room <span style="color:var(--text-light);font-weight:400;">(Online — not required)</span>'
+                : 'Room *';
+        };
+
+        window.toggleOverrideDay = function(chip) {
+            chip.classList.toggle('selected');
+            // Call updatePreview directly — do NOT dispatch a change event on t-start,
+            // as that listener resets overrideInitialised and re-seeds from saved data,
+            // which would undo the user's deselection.
+            if (typeof _updatePreviewFn === 'function') _updatePreviewFn();
+        };
+
+        function saveTraining() {
+            const name = document.getElementById('t-name').value.trim();
+            const subSection = document.getElementById('t-subsection').value;
+            const trainerId = document.getElementById('t-trainer').value;
+            const isOnline = document.getElementById('t-online')?.checked || false;
+            const roomId = isOnline ? 'ONLINE' : document.getElementById('t-room').value;
+            const startDate = document.getElementById('t-start').value;
+            const duration = parseInt(document.getElementById('t-duration').value);
+            const hoursPerDay = parseFloat(document.getElementById('t-hours').value) || 8;
+            const color = getPickerColor('t-color');
+            const includedDates = [...document.querySelectorAll('.override-day-chip.selected')].map(c => c.dataset.date);
+
+            let hasError = false;
+            document.querySelectorAll('.form-group').forEach(g => g.classList.remove('has-error'));
+            if (!name)       { document.getElementById('t-name').closest('.form-group').classList.add('has-error'); hasError = true; }
+            if (!subSection) { document.getElementById('t-subsection').closest('.form-group').classList.add('has-error'); hasError = true; }
+            if (!trainerId)  { document.getElementById('t-trainer').closest('.form-group').classList.add('has-error'); hasError = true; }
+            if (!isOnline && !roomId) { document.getElementById('t-room').closest('.form-group').classList.add('has-error'); hasError = true; }
+            if (!startDate)  { document.getElementById('t-start').closest('.form-group').classList.add('has-error'); hasError = true; }
+            if (!duration || duration < 1) { document.getElementById('t-duration').closest('.form-group').classList.add('has-error'); hasError = true; }
+            if (hasError) return;
+
+            const endDate = formatDate(addWorkingDays(startDate, duration - 1, includedDates));
+            const training = {
+                id: editingId || generateId('tr'),
+                name, subSection, trainerId, roomId, isOnline,
+                startDate, endDate, hoursPerDay,
+                includedDates, color
+            };
+
+            // Check conflicts — warn but allow save via "Move Anyway"
+            const conflicts = checkConflicts(training, editingId);
+            if (conflicts.length > 0) {
+                // Store pending training for forceSaveTraining()
+                window._pendingSaveTraining = { training, editingId };
+                document.getElementById('conflict-save-list').innerHTML =
+                    conflicts.map(c => `• ${c.message}`).join('<br>');
+                document.getElementById('conflict-save-overlay').classList.add('active');
+                return;
+            }
+
+            commitSaveTraining(training, editingId);
+        }
+
+        function editTraining(id) {
+            const training = data.trainings.find(t => t.id === id);
+            if (training) openTrainingModal(training);
+        }
+
+        function deleteTraining(id) {
+            if (confirm('Are you sure you want to delete this training?')) {
+                data.trainings = data.trainings.filter(t => t.id !== id);
+                saveData();
+                renderPage();
+            }
+        }
+
+        // ===================== TASK MODAL =====================
+        function openTaskModal(task = null) {
+            const isEdit = !!task;
+            editingId = task ? task.id : null;
+
+            const trainerOptions = data.trainers.map(t => `<option value="${t.id}" ${task && task.trainerId === t.id ? 'selected' : ''}>${t.name}</option>`).join('');
+            const roomOptions = data.rooms.map(r => `<option value="${r.id}" ${task && task.roomId === r.id ? 'selected' : ''}>${r.name}</option>`).join('');
+            const today = formatDate(new Date());
+
+            openModal(
+                isEdit ? 'Edit Resource Task' : 'Add Resource Task',
+                `
+                    <div style="background:#f0fdfa;border:1px solid #99f6e4;border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;font-size:13px;color:#0f766e;">
+                        <strong>⬡ Resource Task</strong> — assign any activity (meeting, prep, maintenance, admin) to a trainer or room. Tasks appear in the schedule and Gantt chart but do not trigger conflict checks.
+                    </div>
+                    <div class="form-group">
+                        <label>Task Name *</label>
+                        <input type="text" id="tk-name" value="${task ? task.name : ''}" placeholder="e.g., Room Setup, Material Prep, Admin Day">
+                        <div class="form-error">Task name is required</div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Assign to Trainer <span style="color:var(--text-light);font-weight:400;">(optional)</span></label>
+                            <select id="tk-trainer">
+                                <option value="">— None —</option>
+                                ${trainerOptions}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Assign to Room <span style="color:var(--text-light);font-weight:400;">(optional)</span></label>
+                            <select id="tk-room">
+                                <option value="">— None —</option>
+                                ${roomOptions}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Start Date *</label>
+                            <input type="date" id="tk-start" value="${task ? task.startDate : today}">
+                            <div class="form-error">Start date is required</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Duration (Working Days) *</label>
+                            <input type="number" id="tk-duration" min="1" value="${task ? getTrainingWorkingDays(task).length : '1'}">
+                            <div class="form-error">Duration must be at least 1</div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Hours per Day</label>
+                            <select id="tk-hours">
+                                ${[0.5,1,1.5,2,2.5,3,3.5,4,4.5,5,5.5,6,6.5,7,7.5,8].map(h =>
+                                    `<option value="${h}" ${(task ? (task.hoursPerDay || 8) : 8) == h ? 'selected' : ''}>${h}h${h < 8 ? ' (partial)' : ' (full day)'}</option>`
+                                ).join('')}
+                            </select>
+                        </div>
+                        <div class="form-group" style="display:flex;align-items:flex-end;">
+                            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--radius);padding:10px 14px;width:100%;font-size:13px;" id="tk-hours-summary">
+                                <span style="color:var(--text-light);">Total hours will show here</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Colour</label>
+                        ${buildColorPicker('tk-color', task ? task.color : '#14b8a6')}
+                    </div>
+                `,
+                () => saveTask()
+            );
+            editingId = task ? task.id : null;
+
+            // live hours summary
+            const updateTkSummary = () => {
+                const dur = parseInt(document.getElementById('tk-duration').value) || 0;
+                const hpd = parseFloat(document.getElementById('tk-hours').value) || 8;
+                const el = document.getElementById('tk-hours-summary');
+                if (dur > 0) {
+                    const total = dur * hpd;
+                    el.innerHTML = `<strong style="color:#16a34a;font-size:16px;">${total % 1 === 0 ? total : total.toFixed(1)}h</strong> total<br><span style="color:var(--text-light);font-size:11px;">${dur} days × ${hpd}h/day</span>`;
+                } else {
+                    el.innerHTML = '<span style="color:var(--text-light);">Total hours will show here</span>';
+                }
+            };
+            document.getElementById('tk-duration').addEventListener('input', updateTkSummary);
+            document.getElementById('tk-hours').addEventListener('change', updateTkSummary);
+            updateTkSummary();
+        }
+
+        function saveTask() {
+            const name = document.getElementById('tk-name').value.trim();
+            const trainerId = document.getElementById('tk-trainer').value || null;
+            const roomId = document.getElementById('tk-room').value || null;
+            const startDate = document.getElementById('tk-start').value;
+            const duration = parseInt(document.getElementById('tk-duration').value);
+            const hoursPerDay = parseFloat(document.getElementById('tk-hours').value) || 8;
+            const color = getPickerColor('tk-color');
+
+            let hasError = false;
+            document.querySelectorAll('.form-group').forEach(g => g.classList.remove('has-error'));
+            if (!name) { document.getElementById('tk-name').closest('.form-group').classList.add('has-error'); hasError = true; }
+            if (!startDate) { document.getElementById('tk-start').closest('.form-group').classList.add('has-error'); hasError = true; }
+            if (!duration || duration < 1) { document.getElementById('tk-duration').closest('.form-group').classList.add('has-error'); hasError = true; }
+            if (hasError) return;
+
+            const endDate = formatDate(addWorkingDays(startDate, duration - 1));
+            const task = {
+                id: editingId || generateId('tk'),
+                name, trainerId, roomId, startDate, endDate, hoursPerDay, color
+            };
+
+            if (editingId) {
+                const idx = data.tasks.findIndex(t => t.id === editingId);
+                if (idx !== -1) data.tasks[idx] = task;
+            } else {
+                data.tasks.push(task);
+            }
+            saveData();
+            closeModal();
+            renderPage();
+        }
+
+        function editTask(id) {
+            const task = data.tasks.find(t => t.id === id);
+            if (task) openTaskModal(task);
+        }
+
+        function deleteTask(id) {
+            if (confirm('Delete this task?')) {
+                data.tasks = data.tasks.filter(t => t.id !== id);
+                saveData();
+                renderPage();
+            }
+        }
+
+        // ===================== TRAINER MODAL =====================
+        function openTrainerModal(trainer = null) {
+            openModal(
+                trainer ? 'Edit Trainer' : 'Add Trainer',
+                `
+                    <div class="form-group">
+                        <label>Name *</label>
+                        <input type="text" id="tr-name" value="${trainer ? trainer.name : ''}">
+                        <div class="form-error">Name is required</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Expertise</label>
+                        <input type="text" id="tr-expertise" value="${trainer ? trainer.expertise || '' : ''}" placeholder="e.g., Data Science, Leadership">
+                    </div>
+                    <div class="form-group">
+                        <label>Color</label>
+                        ${buildColorPicker('tr-color', trainer ? trainer.color : COLORS[0])}
+                    </div>
+                `,
+                () => {
+                    const name = document.getElementById('tr-name').value.trim();
+                    const expertise = document.getElementById('tr-expertise').value.trim();
+                    const color = getPickerColor('tr-color');
+
+                    if (!name) {
+                        document.getElementById('tr-name').closest('.form-group').classList.add('has-error');
+                        return;
+                    }
+
+                    if (trainer) {
+                        const idx = data.trainers.findIndex(t => t.id === trainer.id);
+                        if (idx !== -1) data.trainers[idx] = { ...trainer, name, expertise, color };
+                    } else {
+                        data.trainers.push({ id: generateId('t'), name, expertise, color });
+                    }
+                    saveData();
+                    closeModal();
+                    renderPage();
+                }
+            );
+            editingId = trainer ? trainer.id : null;
+        }
+
+        function editTrainer(id) { openTrainerModal(data.trainers.find(t => t.id === id)); }
+        function deleteTrainer(id) {
+            if (confirm('Delete this trainer? Any associated trainings will show "Deleted".')) {
+                data.trainers = data.trainers.filter(t => t.id !== id);
+                saveData();
+                renderPage();
+            }
+        }
+
+        // ===================== ROOM MODAL =====================
+        function openRoomModal(room = null) {
+            openModal(
+                room ? 'Edit Room' : 'Add Room',
+                `
+                    <div class="form-group">
+                        <label>Room Name *</label>
+                        <input type="text" id="rm-name" value="${room ? room.name : ''}">
+                        <div class="form-error">Room name is required</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Capacity</label>
+                        <input type="number" id="rm-capacity" value="${room ? room.capacity || '' : '20'}" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label>Color</label>
+                        ${buildColorPicker('rm-color', room ? room.color : COLORS[3])}
+                    </div>
+                `,
+                () => {
+                    const name = document.getElementById('rm-name').value.trim();
+                    const capacity = parseInt(document.getElementById('rm-capacity').value) || 20;
+                    const color = getPickerColor('rm-color');
+
+                    if (!name) {
+                        document.getElementById('rm-name').closest('.form-group').classList.add('has-error');
+                        return;
+                    }
+
+                    if (room) {
+                        const idx = data.rooms.findIndex(r => r.id === room.id);
+                        if (idx !== -1) data.rooms[idx] = { ...room, name, capacity, color };
+                    } else {
+                        data.rooms.push({ id: generateId('r'), name, capacity, color });
+                    }
+                    saveData();
+                    closeModal();
+                    renderPage();
+                }
+            );
+            editingId = room ? room.id : null;
+        }
+
+        function editRoom(id) { openRoomModal(data.rooms.find(r => r.id === id)); }
+        function deleteRoom(id) {
+            if (confirm('Delete this room? Any associated trainings will show "Deleted".')) {
+                data.rooms = data.rooms.filter(r => r.id !== id);
+                saveData();
+                renderPage();
+            }
+        }
+
+        // ===================== HOLIDAY MODAL =====================
+        function openHolidayModal(holiday = null) {
+            openModal(
+                holiday ? 'Edit Holiday' : 'Add Public Holiday',
+                `
+                    <div class="form-group">
+                        <label>Holiday Name *</label>
+                        <input type="text" id="h-name" value="${holiday ? holiday.name : ''}">
+                        <div class="form-error">Holiday name is required</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Date *</label>
+                        <input type="date" id="h-date" value="${holiday ? holiday.date : ''}">
+                        <div class="form-error">Date is required</div>
+                        <div class="form-hint">Trainings will automatically skip this date</div>
+                    </div>
+                `,
+                () => {
+                    const name = document.getElementById('h-name').value.trim();
+                    const date = document.getElementById('h-date').value;
+
+                    if (!name) {
+                        document.getElementById('h-name').closest('.form-group').classList.add('has-error');
+                        return;
+                    }
+                    if (!date) {
+                        document.getElementById('h-date').closest('.form-group').classList.add('has-error');
+                        return;
+                    }
+
+                    if (holiday) {
+                        const idx = data.holidays.findIndex(h => h.id === holiday.id);
+                        if (idx !== -1) data.holidays[idx] = { ...holiday, name, date };
+                    } else {
+                        data.holidays.push({ id: generateId('h'), name, date });
+                    }
+                    saveData();
+                    closeModal();
+                    renderPage();
+                }
+            );
+            editingId = holiday ? holiday.id : null;
+        }
+
+        function editHoliday(id) { openHolidayModal(data.holidays.find(h => h.id === id)); }
+        function deleteHoliday(id) {
+            if (confirm('Delete this holiday? This may affect existing training schedules.')) {
+                data.holidays = data.holidays.filter(h => h.id !== id);
+                saveData();
+                renderPage();
+            }
+        }
+
+        // ===================== ANNUAL LEAVE MODAL =====================
+        function openLeaveModal(leave = null) {
+            const isEdit = !!leave;
+            editingId = leave ? leave.id : null;
+            const trainerOptions = data.trainers.map(t =>
+                `<option value="${t.id}" ${leave && leave.trainerId === t.id ? 'selected' : ''}>${t.name}</option>`
+            ).join('');
+            const today = formatDate(new Date());
+
+            openModal(
+                isEdit ? 'Edit Annual Leave' : 'Add Annual Leave',
+                `
+                    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;font-size:13px;color:#92400e;">
+                        Annual leave is calculated in <strong>working days only</strong> — weekends and public holidays are automatically excluded.
+                    </div>
+                    <div class="form-group">
+                        <label>Trainer *</label>
+                        <select id="l-trainer">
+                            <option value="">Select Trainer</option>
+                            ${trainerOptions}
+                        </select>
+                        <div class="form-error">Please select a trainer</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Leave Note <span style="font-weight:400;color:var(--text-light);">(optional)</span></label>
+                        <input type="text" id="l-name" value="${leave ? leave.name || '' : ''}" placeholder="e.g., Annual Leave, Personal Leave">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Start Date *</label>
+                            <input type="date" id="l-start" value="${leave ? leave.startDate : today}" onchange="updateLeavePreview()">
+                            <div class="form-error">Start date is required</div>
+                        </div>
+                        <div class="form-group">
+                            <label>End Date *</label>
+                            <input type="date" id="l-end" value="${leave ? leave.endDate : today}" onchange="updateLeavePreview()">
+                            <div class="form-error">End date is required</div>
+                        </div>
+                    </div>
+                    <div id="leave-preview" style="padding:10px 14px;background:#f8fafc;border-radius:var(--radius);font-size:13px;min-height:36px;"></div>
+                `,
+                () => saveLeave()
+            );
+            editingId = leave ? leave.id : null;
+            setTimeout(() => updateLeavePreview(), 50);
+        }
+
+        window.updateLeavePreview = function() {
+            const start = document.getElementById('l-start')?.value;
+            const end   = document.getElementById('l-end')?.value;
+            const el    = document.getElementById('leave-preview');
+            if (!el) return;
+            if (start && end && end >= start) {
+                const wds = getWorkingDaysBetween(start, end);
+                el.innerHTML = `✓ <strong>${wds.length} working day(s)</strong> of leave (${formatDisplayDate(start)} → ${formatDisplayDate(end)}, weekends & holidays excluded)`;
+                el.style.color = '#16a34a';
+            } else if (start && end && end < start) {
+                el.innerHTML = '⚠ End date must be on or after start date';
+                el.style.color = '#dc2626';
+            } else {
+                el.innerHTML = '';
+            }
+        };
+
+        function saveLeave() {
+            const trainerId = document.getElementById('l-trainer').value;
+            const name      = document.getElementById('l-name').value.trim();
+            const startDate = document.getElementById('l-start').value;
+            const endDate   = document.getElementById('l-end').value;
+
+            let hasError = false;
+            document.querySelectorAll('.form-group').forEach(g => g.classList.remove('has-error'));
+            if (!trainerId) { document.getElementById('l-trainer').closest('.form-group').classList.add('has-error'); hasError = true; }
+            if (!startDate) { document.getElementById('l-start').closest('.form-group').classList.add('has-error'); hasError = true; }
+            if (!endDate || endDate < startDate) { document.getElementById('l-end').closest('.form-group').classList.add('has-error'); hasError = true; }
+            if (hasError) return;
+
+            const leaveDays = getWorkingDaysBetween(startDate, endDate).map(d => formatDate(d));
+            const leave = {
+                id: editingId || generateId('lv'),
+                trainerId, name, startDate, endDate, leaveDays
+            };
+
+            if (editingId) {
+                const idx = data.leaves.findIndex(l => l.id === editingId);
+                if (idx !== -1) data.leaves[idx] = leave;
+            } else {
+                data.leaves.push(leave);
+            }
+            saveData();
+            closeModal();
+            renderPage();
+        }
+
+        function editLeave(id) { openLeaveModal(data.leaves.find(l => l.id === id)); }
+        function deleteLeave(id) {
+            if (confirm('Delete this annual leave entry?')) {
+                data.leaves = data.leaves.filter(l => l.id !== id);
+                saveData();
+                renderPage();
+            }
+        }
+
+        // ===================== TOOLTIP =====================
+        function showTooltip(e, text) {
+            const tooltip = document.getElementById('tooltip');
+            tooltip.innerHTML = text.replace(/\n/g, '<br>');
+            tooltip.classList.add('active');
+            const rect = e.target.getBoundingClientRect();
+            tooltip.style.left = (rect.left + rect.width / 2 - tooltip.offsetWidth / 2) + 'px';
+            tooltip.style.top = (rect.top - tooltip.offsetHeight - 8) + 'px';
+        }
+
+        function hideTooltip() {
+            document.getElementById('tooltip').classList.remove('active');
+        }
+
+        function navigateTo(page) {
+            document.querySelector(`.nav-item[data-page="${page}"]`).click();
+        }
+
+        // ===================== COLOR PICKER HELPER =====================
+        function buildColorPicker(name, selectedColor) {
+            const presets = ['#2563eb','#16a34a','#9333ea','#ea580c','#0891b2','#db2777','#ca8a04','#4f46e5','#0f766e','#b45309','#dc2626','#7c3aed','#0284c7','#15803d'];
+            const isPreset = presets.includes(selectedColor);
+            return `
+                <div class="color-picker-wrap" id="cpw-${name}">
+                    <div class="color-swatches">
+                        ${presets.map(c => `
+                            <span class="color-swatch ${selectedColor === c ? 'selected' : ''}"
+                                style="background:${c};"
+                                data-color="${c}"
+                                title="${c}"
+                                onclick="selectSwatch('${name}', '${c}', this)"></span>
+                        `).join('')}
+                    </div>
+                    <div class="color-custom-row">
+                        <span class="color-custom-label">Custom colour:</span>
+                        <input type="color" class="color-native-input" id="cp-native-${name}"
+                            value="${selectedColor}"
+                            oninput="onNativeColorChange('${name}', this.value)"
+                            onchange="onNativeColorChange('${name}', this.value)">
+                        <span class="color-preview-hex" id="cp-hex-${name}">${selectedColor}</span>
+                        <input type="hidden" id="cp-value-${name}" value="${selectedColor}">
+                    </div>
+                </div>`;
+        }
+
+        function selectSwatch(name, color, el) {
+            // Deselect all swatches in this picker
+            document.querySelectorAll(`#cpw-${name} .color-swatch`).forEach(s => s.classList.remove('selected'));
+            el.classList.add('selected');
+            document.getElementById(`cp-value-${name}`).value = color;
+            document.getElementById(`cp-hex-${name}`).textContent = color;
+            document.getElementById(`cp-native-${name}`).value = color;
+        }
+
+        function onNativeColorChange(name, color) {
+            document.getElementById(`cp-value-${name}`).value = color;
+            document.getElementById(`cp-hex-${name}`).textContent = color;
+            // Deselect preset swatches if custom colour chosen
+            document.querySelectorAll(`#cpw-${name} .color-swatch`).forEach(s => {
+                s.classList.toggle('selected', s.dataset.color === color);
+            });
+        }
+
+        function getPickerColor(name) {
+            return document.getElementById(`cp-value-${name}`)?.value || COLORS[0];
+        }
+
+        // ===================== BULK IMPORT =====================
+        function openBulkImportModal() {
+            const page = currentPage;
+            let templateInfo = '';
+            let csvHeader = '';
+            let exampleRows = '';
+            let entityLabel = '';
+
+            if (page === 'trainers') {
+                entityLabel = 'Trainers';
+                csvHeader = 'name,expertise,color';
+                exampleRows = 'Dr. Sarah Johnson,Data Science,#2563eb\nProf. Michael Chen,Machine Learning,#16a34a';
+                templateInfo = 'Columns: <strong>name</strong> (required), <strong>expertise</strong>, <strong>color</strong> (hex, optional)';
+            } else if (page === 'rooms') {
+                entityLabel = 'Rooms';
+                csvHeader = 'name,capacity,color';
+                exampleRows = 'Conference Hall A,50,#ea580c\nTraining Room B,25,#0891b2';
+                templateInfo = 'Columns: <strong>name</strong> (required), <strong>capacity</strong> (number), <strong>color</strong> (hex, optional)';
+            } else if (page === 'holidays') {
+                entityLabel = 'Holidays';
+                csvHeader = 'name,date';
+                exampleRows = 'New Year,2026-01-01\nNational Day,2026-12-02';
+                templateInfo = 'Columns: <strong>name</strong> (required), <strong>date</strong> (YYYY-MM-DD, required)';
+            } else if (page === 'trainings') {
+                entityLabel = 'Trainings';
+                csvHeader = 'name,sub_section,trainer_name,room_name,start_date,duration_days,hours_per_day,color';
+                exampleRows = 'Advanced Python,CC Training,Dr. Sarah Johnson,Training Room B,2026-06-01,5,8,#2563eb\nQuick Briefing,Retail Sales,Dr. Sarah Johnson,Conference Hall A,2026-06-10,1,3,#9333ea\nField Orientation,Field Training,Prof. Michael Chen,Conference Hall A,2026-06-15,3,8,#16a34a';
+                templateInfo = 'Columns: <strong>name</strong>, <strong>sub_section</strong> (CC Training / Retail Sales / Field Training), <strong>trainer_name</strong>, <strong>room_name</strong>, <strong>start_date</strong> (YYYY-MM-DD), <strong>duration_days</strong>, <strong>hours_per_day</strong> (optional), <strong>color</strong> (hex, optional)';
+            }
+
+            const fullTemplate = csvHeader + '\n' + exampleRows;
+
+            openModal(
+                `Bulk Import — ${entityLabel}`,
+                `
+                <div class="import-tabs">
+                    <button class="import-tab active" onclick="switchImportTab('paste', this)">Paste CSV</button>
+                    <button class="import-tab" onclick="switchImportTab('file', this)">Upload File</button>
+                    <button class="import-tab" onclick="switchImportTab('template', this)">Download Template</button>
+                </div>
+
+                <div class="import-panel active" id="import-panel-paste">
+                    <p style="font-size:13px;color:var(--text-light);margin-bottom:8px;">${templateInfo}</p>
+                    <textarea class="bulk-textarea" id="bulk-csv-text" placeholder="${fullTemplate}" spellcheck="false"></textarea>
+                    <div class="bulk-hint">First row can be the header row (it will be auto-detected and skipped).</div>
+                </div>
+
+                <div class="import-panel" id="import-panel-file">
+                    <div class="bulk-import-area" id="drop-zone"
+                        ondragover="event.preventDefault();this.classList.add('drag-over')"
+                        ondragleave="this.classList.remove('drag-over')"
+                        ondrop="handleFileDrop(event)">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5" style="margin-bottom:8px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        <div style="font-size:14px;color:var(--text-light);">Drag &amp; drop a CSV file here</div>
+                        <div style="font-size:12px;color:var(--text-light);margin:6px 0;">or</div>
+                        <label class="btn btn-secondary btn-sm" style="cursor:pointer;">
+                            Browse File
+                            <input type="file" accept=".csv,.txt" style="display:none" onchange="handleFileSelect(this)">
+                        </label>
+                        <div id="file-name" style="font-size:12px;color:var(--success);margin-top:8px;"></div>
+                    </div>
+                </div>
+
+                <div class="import-panel" id="import-panel-template">
+                    <p style="font-size:13px;margin-bottom:12px;">Download a ready-to-fill CSV template for <strong>${entityLabel}</strong>:</p>
+                    <button class="btn btn-secondary" onclick="downloadTemplate('${csvHeader}', '${exampleRows.replace(/\n/g,'\\n')}', '${page}')">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Download ${entityLabel} Template.csv
+                    </button>
+                    <div style="margin-top:16px;padding:12px;background:var(--bg);border-radius:var(--radius);font-size:12px;font-family:monospace;white-space:pre-wrap;color:var(--text-light);">${fullTemplate}</div>
+                </div>
+
+                <div class="bulk-results" id="bulk-results"></div>
+                `,
+                () => processBulkImport(page)
+            );
+
+            document.getElementById('modal-save').textContent = 'Import';
+        }
+
+        function switchImportTab(tab, el) {
+            document.querySelectorAll('.import-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.import-panel').forEach(p => p.classList.remove('active'));
+            el.classList.add('active');
+            document.getElementById('import-panel-' + tab).classList.add('active');
+        }
+
+        function handleFileSelect(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = e => {
+                document.getElementById('bulk-csv-text') && (document.getElementById('bulk-csv-text').value = e.target.result);
+                // Switch to paste tab so user can see content
+                document.querySelectorAll('.import-tab')[0].click();
+                document.getElementById('file-name').textContent = '✓ ' + file.name + ' loaded';
+            };
+            reader.readAsText(file);
+        }
+
+        function handleFileDrop(event) {
+            event.preventDefault();
+            document.getElementById('drop-zone').classList.remove('drag-over');
+            const file = event.dataTransfer.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = e => {
+                document.querySelectorAll('.import-tab')[0].click();
+                document.getElementById('bulk-csv-text').value = e.target.result;
+                document.getElementById('file-name').textContent = '✓ ' + file.name + ' loaded';
+            };
+            reader.readAsText(file);
+        }
+
+        function downloadTemplate(header, exampleStr, page) {
+            const rows = exampleStr.replace(/\\n/g, '\n');
+            const content = header + '\n' + rows;
+            const blob = new Blob([content], { type: 'text/csv' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `protrain_${page}_template.csv`;
+            a.click();
+        }
+
+        function parseCSV(text) {
+            // Detect if this is tab-separated (from Excel paste) or comma-separated
+            const isTSV = text.indexOf('\t') !== -1;
+            const delimiter = isTSV ? '\t' : ',';
+
+            // Normalise line endings (Windows \r\n, old Mac \r, Unix \n)
+            const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+                .trim().split('\n').map(l => l.trim()).filter(l => l);
+            return lines.map(line => {
+                const cols = [];
+                let cur = '', inQ = false;
+                for (let i = 0; i < line.length; i++) {
+                    const ch = line[i];
+                    if (ch === '"') { inQ = !inQ; }
+                    else if (ch === delimiter && !inQ) { cols.push(cur.trim()); cur = ''; }
+                    else cur += ch;
+                }
+                cols.push(cur.trim());
+                return cols;
+            });
+        }
+
+        // Accept DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD, YYYY/MM/DD, or general date strings → returns YYYY-MM-DD or null
+        function normaliseDate(raw) {
+            if (!raw) return null;
+            const s = raw.trim();
+            // Already YYYY-MM-DD or YYYY/MM/DD
+            if (/^\d{4}[-\/]\d{2}[-\/]\d{2}$/.test(s)) {
+                return s.replace(/\//g, '-');
+            }
+            // DD-MM-YYYY or DD/MM/YYYY or MM/DD/YYYY
+            if (/^\d{1,2}[-\/]\d{1,2}[-\/]\d{4}$/.test(s)) {
+                let [p1, p2, y] = s.split(/[-\/]/);
+                // If p2 > 12, it must be MM/DD/YYYY format (US), so p2 is the day
+                if (parseInt(p2, 10) > 12) {
+                    return `${y}-${p1.padStart(2,'0')}-${p2.padStart(2,'0')}`;
+                }
+                // If p1 > 12, it must be DD/MM/YYYY
+                if (parseInt(p1, 10) > 12) {
+                    return `${y}-${p2.padStart(2,'0')}-${p1.padStart(2,'0')}`;
+                }
+                // Otherwise assume DD-MM-YYYY as default
+                return `${y}-${p2.padStart(2,'0')}-${p1.padStart(2,'0')}`;
+            }
+            // Handle Excel serial date numbers (e.g. 46028)
+            if (/^\d{5}$/.test(s)) {
+                const serial = parseInt(s, 10);
+                // Excel epoch is Jan 1, 1900. Offset to Unix epoch is 25569 days.
+                const d = new Date((serial - 25569) * 86400 * 1000);
+                if (!isNaN(d.getTime())) {
+                    const y = d.getUTCFullYear();
+                    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+                    const day = String(d.getUTCDate()).padStart(2, '0');
+                    return `${y}-${m}-${day}`;
+                }
+            }
+            // Fallback for Excel text formats like 1-Jun-26, 01-Jun-2026, etc.
+            const parsed = new Date(s);
+            if (!isNaN(parsed.getTime())) {
+                const y = parsed.getFullYear();
+                const m = String(parsed.getMonth() + 1).padStart(2, '0');
+                const d = String(parsed.getDate()).padStart(2, '0');
+                return `${y}-${m}-${d}`;
+            }
+            return null;
+        }
+
+        function processBulkImport(page) {
+            const text = document.getElementById('bulk-csv-text')?.value?.trim();
+            if (!text) {
+                document.getElementById('bulk-results').innerHTML = '<span class="err">⚠ No data to import. Please paste CSV rows.</span>';
+                return;
+            }
+
+            let rows = parseCSV(text);
+            // Auto-detect and skip header row
+            const knownHeaders = ['name','trainer_name','room_name','start_date','duration_days','capacity','date','expertise','color','sub_section'];
+            if (rows.length > 0 && knownHeaders.some(h => rows[0].map(c=>c.toLowerCase()).includes(h))) {
+                rows = rows.slice(1);
+            }
+
+            let imported = 0, errors = [];
+
+            rows.forEach((cols, i) => {
+                const rowNum = i + 1;
+                try {
+                    if (page === 'trainers') {
+                        const name = cols[0];
+                        if (!name) throw new Error('Name is required');
+                        const expertise = cols[1] || '';
+                        const color = (cols[2] && /^#[0-9a-fA-F]{3,6}$/.test(cols[2])) ? cols[2] : COLORS[imported % COLORS.length];
+                        data.trainers.push({ id: generateId('t'), name, expertise, color });
+                        imported++;
+                    } else if (page === 'rooms') {
+                        const name = cols[0];
+                        if (!name) throw new Error('Name is required');
+                        const capacity = parseInt(cols[1]) || 20;
+                        const color = (cols[2] && /^#[0-9a-fA-F]{3,6}$/.test(cols[2])) ? cols[2] : COLORS[imported % COLORS.length];
+                        data.rooms.push({ id: generateId('r'), name, capacity, color });
+                        imported++;
+                    } else if (page === 'holidays') {
+                        const name = cols[0];
+                        const date = normaliseDate(cols[1]);
+                        if (!name) throw new Error('Name is required');
+                        if (!date) throw new Error('Date must be DD-MM-YYYY or YYYY-MM-DD');
+                        data.holidays.push({ id: generateId('h'), name, date });
+                        imported++;
+                    } else if (page === 'trainings') {
+                        const name        = cols[0];
+                        const subSection  = cols[1] && SUB_SECTIONS.includes(cols[1].trim()) ? cols[1].trim() : '';
+                        const trainerName = cols[2];
+                        const roomName    = cols[3];
+                        const startDate   = normaliseDate(cols[4]);
+                        const duration    = parseInt(cols[5]);
+                        const hoursPerDay = parseFloat(cols[6]) || 8;
+                        const color       = (cols[7] && /^#[0-9a-fA-F]{3,6}$/.test(cols[7])) ? cols[7] : COLORS[imported % COLORS.length];
+                        if (!name) throw new Error('Name is required');
+                        if (!startDate) throw new Error('start_date must be DD-MM-YYYY or YYYY-MM-DD');
+                        if (!duration || duration < 1) throw new Error('duration_days must be a positive number');
+                        const trainer = data.trainers.find(t => t.name.toLowerCase() === (trainerName||'').toLowerCase());
+                        if (!trainer) throw new Error(`Trainer "${trainerName}" not found — add them first`);
+                        const room = data.rooms.find(r => r.name.toLowerCase() === (roomName||'').toLowerCase());
+                        if (!room) throw new Error(`Room "${roomName}" not found — add it first`);
+                        const endDate = formatDate(addWorkingDays(startDate, duration - 1));
+                        data.trainings.push({ id: generateId('tr'), name, subSection, trainerId: trainer.id, roomId: room.id, startDate, endDate, hoursPerDay, color });
+                        imported++;
+                    }
+                } catch(e) {
+                    errors.push(`Row ${rowNum}: ${e.message}`);
+                }
+            });
+
+            if (imported > 0) saveData();
+
+            let html = '';
+            if (imported > 0) html += `<div class="ok">✓ Successfully imported ${imported} record${imported > 1 ? 's' : ''}.</div>`;
+            if (errors.length > 0) html += `<div class="err">⚠ ${errors.length} row(s) had errors:<br>` + errors.map(e => `• ${e}`).join('<br>') + '</div>';
+            document.getElementById('bulk-results').innerHTML = html;
+
+            if (imported > 0 && errors.length === 0) {
+                setTimeout(() => { closeModal(); renderPage(); }, 800);
+            } else if (imported > 0) {
+                renderPage();
+            }
+        }
+
+        // ===================== REPORTS =====================
+        function renderReports() {
+            document.getElementById('page-title').textContent = 'Reports';
+            const trainingCount = data.trainings.length;
+            const trainerCount = data.trainers.length;
+            const roomCount = data.rooms.length;
+            const holidayCount = data.holidays.length;
+
+            document.getElementById('content').innerHTML = `
+                <div class="reports-grid">
+
+                    <!-- 1. Planned Training Report -->
+                    <div class="report-card">
+                        <div class="report-card-icon" style="background:#eff6ff;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                        </div>
+                        <div class="report-card-title">Planned Training Report</div>
+                        <div class="report-card-desc">Full details of all scheduled trainings — trainer, room, start/end dates, working days, hours per day, total hours, weekends &amp; holidays skipped, and conflict status.</div>
+                        <div class="report-card-meta">${trainingCount} training(s) · CSV format</div>
+                        <button class="btn btn-report" onclick="exportPlannedTrainingReport()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Export CSV
+                        </button>
+                    </div>
+
+                    
+                    <!-- 1b. Participant Roster Report -->
+                    <div class="report-card">
+                        <div class="report-card-icon" style="background:#eff6ff;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        </div>
+                        <div class="report-card-title">Participant Roster Report</div>
+                        <div class="report-card-desc">Detailed flat list of all participants enrolled in trainings. Includes Participant Name, Emp ID, Email, Department, along with Training Name, Trainer, Room, and Dates. Perfect for pivot tables.</div>
+                        <div class="report-card-meta">All Participants · Flat CSV</div>
+                        <button class="btn btn-report" onclick="exportParticipantRosterReport()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Export CSV
+                        </button>
+                    </div>
+
+                    <!-- 2. Trainer Occupancy Matrix -->
+                    <div class="report-card">
+                        <div class="report-card-icon" style="background:#f0fdf4;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                        </div>
+                        <div class="report-card-title">Trainer Occupancy Matrix</div>
+                        <div class="report-card-desc">Daily matrix showing which trainer is booked on which day across the full schedule range. Excel-ready — rows are trainers, columns are dates, cells show training name or blank.</div>
+                        <div class="report-card-meta">${trainerCount} trainer(s) · CSV matrix</div>
+                        <button class="btn btn-report-green" onclick="exportTrainerOccupancy()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Export CSV
+                        </button>
+                    </div>
+
+                    <!-- 2b. Trainer Occupancy Summary -->
+                    <div class="report-card">
+                        <div class="report-card-icon" style="background:#f0fdf4;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><circle cx="18" cy="8" r="2"/><circle cx="12" cy="2" r="2"/><circle cx="6" cy="12" r="2"/></svg>
+                        </div>
+                        <div class="report-card-title">Trainer Occupancy Summary</div>
+                        <div class="report-card-desc">One row per trainer — sessions scheduled, total training days, total training hours, and occupancy % based on working days in the overall schedule period. Includes a live preview below.</div>
+                        <div class="report-card-meta">${trainerCount} trainer(s) · Summary CSV</div>
+                        <button class="btn btn-report-green" onclick="exportTrainerOccupancySummary()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Export CSV
+                        </button>
+                    </div>
+
+                    <!-- 3. Room Occupancy -->
+                    <div class="report-card">
+                        <div class="report-card-icon" style="background:#faf5ff;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                        </div>
+                        <div class="report-card-title">Room Occupancy Matrix</div>
+                        <div class="report-card-desc">Daily matrix showing which room is occupied on which day. Rows are rooms, columns are dates, cells show training name or blank. Instantly spot free slots.</div>
+                        <div class="report-card-meta">${roomCount} room(s) · CSV matrix</div>
+                        <button class="btn btn-report-purple" onclick="exportRoomOccupancy()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Export CSV
+                        </button>
+                    </div>
+
+                    
+                    <!-- 3b. Trainer Availability -->
+                    <div class="report-card">
+                        <div class="report-card-icon" style="background:#f0fdf4;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 6v6l4 2"/></svg>
+                        </div>
+                        <div class="report-card-title">Trainer Availability Report</div>
+                        <div class="report-card-desc">Detailed list of working days a trainer is free within a chosen date range.</div>
+                        <div class="report-card-meta">${trainerCount} trainer(s) · Date Range</div>
+                        <button class="btn btn-report-green" onclick="openReportDateModal('trainer_availability')">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Export CSV
+                        </button>
+                    </div>
+
+                    <!-- 3c. Room Availability -->
+                    <div class="report-card">
+                        <div class="report-card-icon" style="background:#faf5ff;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 6v6l4 2"/></svg>
+                        </div>
+                        <div class="report-card-title">Room Availability Report</div>
+                        <div class="report-card-desc">Detailed list of working days a room is free within a chosen date range.</div>
+                        <div class="report-card-meta">${roomCount} room(s) · Date Range</div>
+                        <button class="btn btn-report-purple" onclick="openReportDateModal('room_availability')">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Export CSV
+                        </button>
+                    </div>
+
+                    <!-- 4. Master Data -->
+                    <div class="report-card">
+                        <div class="report-card-icon" style="background:#fff7ed;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                        </div>
+                        <div class="report-card-title">Master Data Exports</div>
+                        <div class="report-card-desc">Individual CSV exports for each master data entity — Trainers, Rooms, and Public Holidays. Useful for audits, backups, or importing into other systems.</div>
+                        <div class="report-card-meta">${trainerCount} trainers · ${roomCount} rooms · ${holidayCount} holidays</div>
+                        <div class="master-export-row">
+                            <button class="btn btn-report-orange btn-sm" style="flex:1;" onclick="exportMasterTrainers()">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                Trainers
+                            </button>
+                            <button class="btn btn-report-orange btn-sm" style="flex:1;" onclick="exportMasterRooms()">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                Rooms
+                            </button>
+                            <button class="btn btn-report-orange btn-sm" style="flex:1;" onclick="exportMasterHolidays()">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                Holidays
+                            </button>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Summary stats for report context -->
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Data Summary</span></div>
+                    <div class="card-body">
+                        <table class="data-table">
+                            <thead><tr><th>Entity</th><th>Count</th><th>Details</th></tr></thead>
+                            <tbody>
+                                <tr><td>Trainings</td><td><strong>${trainingCount}</strong></td><td>${data.trainings.filter(t => new Date(t.endDate) >= new Date()).length} upcoming, ${data.trainings.filter(t => new Date(t.endDate) < new Date()).length} completed</td></tr>
+                                <tr><td>Tasks</td><td><strong>${data.tasks.length}</strong></td><td>${data.tasks.filter(t => new Date(t.endDate) >= new Date()).length} upcoming</td></tr>
+                                <tr><td>Trainers</td><td><strong>${trainerCount}</strong></td><td>${data.trainers.map(t => t.name).join(', ') || '—'}</td></tr>
+                                <tr><td>Rooms</td><td><strong>${roomCount}</strong></td><td>${data.rooms.map(r => r.name + ' (' + r.capacity + ')').join(', ') || '—'}</td></tr>
+                                <tr><td>Public Holidays</td><td><strong>${holidayCount}</strong></td><td>${data.holidays.map(h => h.name).join(', ') || '—'}</td></tr>
+                                <tr><td>Total Training Hours</td><td><strong>${(() => { const h = data.trainings.reduce((s,t) => s + getTrainingWorkingDays(t).length * (t.hoursPerDay||8), 0); return h % 1 === 0 ? h : h.toFixed(1); })()}h</strong></td><td>Across all scheduled trainings</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Trainer Occupancy Summary Live Preview -->
+                <div class="card" style="margin-top:20px;">
+                    <div class="card-header">
+                        <span class="card-title" style="color:#16a34a;">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2" style="vertical-align:middle;margin-right:4px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                            Trainer Occupancy Summary — Live Preview
+                        </span>
+                        <button class="btn btn-report-green btn-sm" onclick="exportTrainerOccupancySummary()" style="width:auto;">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Export CSV
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        ${(() => {
+                            if (data.trainers.length === 0 || data.trainings.length === 0) {
+                                return '<div style="color:var(--text-light);font-size:13px;padding:8px 0;">No trainer or training data available yet.</div>';
+                            }
+                            const { totalWorkingDays, periodLabel } = getSchedulePeriodStats();
+                            const rows = buildTrainerOccupancyRows();
+                            return `
+                                <div style="font-size:12px;color:var(--text-light);margin-bottom:12px;">
+                                    Schedule period: <strong>${periodLabel}</strong> · <strong>${totalWorkingDays}</strong> total working days
+                                    <span style="margin-left:6px;font-style:italic;">(excludes weekends &amp; public holidays)</span>
+                                </div>
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Trainer</th>
+                                            <th>Expertise</th>
+                                            <th style="text-align:center;">Sessions</th>
+                                            <th style="text-align:center;">Training Days</th>
+                                            <th style="text-align:center;">Total Hours</th>
+                                            <th style="text-align:center;">Occupancy %</th>
+                                            <th style="min-width:120px;">Utilisation Bar</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${rows.map(r => {
+                                            const pct = r.occupancyPct;
+                                            const barColor = pct >= 90 ? '#dc2626' : pct >= 70 ? '#ea580c' : pct >= 40 ? '#16a34a' : '#0891b2';
+                                            const badge = pct >= 90 ? 'badge-red' : pct >= 70 ? 'badge-orange' : pct >= 40 ? 'badge-green' : 'badge-blue';
+                                            return `<tr>
+                                                <td><strong>${r.name}</strong></td>
+                                                <td style="color:var(--text-light);font-size:12px;">${r.expertise || '—'}</td>
+                                                <td style="text-align:center;">${r.sessions}</td>
+                                                <td style="text-align:center;">${r.trainingDays}</td>
+                                                <td style="text-align:center;"><strong>${r.totalHours % 1 === 0 ? r.totalHours : r.totalHours.toFixed(1)}h</strong></td>
+                                                <td style="text-align:center;"><span class="badge ${badge}">${pct.toFixed(1)}%</span></td>
+                                                <td>
+                                                    <div style="background:#e2e8f0;border-radius:4px;height:8px;overflow:hidden;">
+                                                        <div style="background:${barColor};width:${Math.min(pct,100)}%;height:100%;border-radius:4px;transition:width 0.3s;"></div>
+                                                    </div>
+                                                </td>
+                                            </tr>`;
+                                        }).join('')}
+                                    </tbody>
+                                </table>
+                                <div style="margin-top:10px;font-size:11px;color:var(--text-light);display:flex;gap:16px;flex-wrap:wrap;">
+                                    <span><span class="badge badge-blue" style="font-size:10px;">0–39%</span> Low</span>
+                                    <span><span class="badge badge-green" style="font-size:10px;">40–69%</span> Healthy</span>
+                                    <span><span class="badge badge-orange" style="font-size:10px;">70–89%</span> High</span>
+                                    <span><span class="badge badge-red" style="font-size:10px;">90%+</span> Overloaded</span>
+                                </div>
+                            `;
+                        })()}
+                    </div>
+                </div>
+            `;
+        }
+
+        // ===================== CSV HELPERS =====================
+        function downloadCSV(filename, rows) {
+            const csvContent = rows.map(row =>
+                row.map(cell => {
+                    const str = String(cell == null ? '' : cell);
+                    return str.includes(',') || str.includes('"') || str.includes('\n')
+                        ? '"' + str.replace(/"/g, '""') + '"'
+                        : str;
+                }).join(',')
+            ).join('\r\n');
+            const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        }
+
+        function getScheduleDateRange() {
+            const allItems = [...data.trainings, ...data.tasks];
+            if (allItems.length === 0) return { start: new Date(), end: new Date() };
+            const starts = allItems.map(t => new Date(t.startDate));
+            const ends = allItems.map(t => new Date(t.endDate));
+            return { start: new Date(Math.min(...starts)), end: new Date(Math.max(...ends)) };
+        }
+
+        function getAllDaysInRange(start, end) {
+            const days = [];
+            let cur = new Date(start);
+            cur.setHours(0,0,0,0);
+            const endD = new Date(end);
+            endD.setHours(0,0,0,0);
+            while (cur <= endD) {
+                days.push(new Date(cur));
+                cur.setDate(cur.getDate() + 1);
+            }
+            return days;
+        }
+
+        // 1. Planned Training Report
+        function exportPlannedTrainingReport() {
+            if (data.trainings.length === 0) { showToast('⚠ No trainings to export', true); return; }
+            const header = [
+                'Training Name','Sub-Section','Trainer','Room','Start Date','End Date',
+                'Working Days','Override Days','Total Days','Hours Per Day','Total Hours',
+                'Weekends Skipped','Holidays Skipped','Holiday Names',
+                'Has Conflict','Conflict Details','Status'
+            ];
+            const rows = [header];
+            const sorted = [...data.trainings].sort((a,b) => new Date(a.startDate)-new Date(b.startDate));
+            sorted.forEach(t => {
+                const trainer = data.trainers.find(tr => tr.id === t.trainerId);
+                const room = data.rooms.find(r => r.id === t.roomId);
+                const workDays = getTrainingWorkingDays(t);
+                const overrideDays = (t.includedDates || []).filter(d => isWeekend(new Date(d)) || isHoliday(new Date(d)));
+                const hpd = t.hoursPerDay || 8;
+                const totalHours = workDays.length * hpd;
+
+                // Count weekends/holidays skipped
+                let weekendSkip = 0, holidaySkip = 0;
+                const holidayNames = [];
+                let cur = new Date(t.startDate);
+                const endD = new Date(t.endDate);
+                while (cur <= endD) {
+                    if (isWeekend(cur)) weekendSkip++;
+                    if (isHoliday(cur)) { holidaySkip++; const hn = getHolidayName(cur); if (hn) holidayNames.push(hn); }
+                    cur.setDate(cur.getDate()+1);
+                }
+
+                const conflicts = checkConflicts(t);
+                const isPast = new Date(t.endDate) < new Date();
+                const isActive = new Date(t.startDate) <= new Date() && new Date(t.endDate) >= new Date();
+                const status = conflicts.length > 0 ? 'Conflict' : isPast ? 'Completed' : isActive ? 'In Progress' : 'Upcoming';
+
+                rows.push([
+                    t.name,
+                    t.subSection || 'Unassigned',
+                    trainer ? trainer.name : 'DELETED',
+                    room ? room.name : 'DELETED',
+                    t.startDate,
+                    t.endDate,
+                    workDays.length - overrideDays.length,
+                    overrideDays.length,
+                    workDays.length,
+                    hpd,
+                    totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1),
+                    weekendSkip,
+                    holidaySkip,
+                    holidayNames.join('; '),
+                    conflicts.length > 0 ? 'YES' : 'No',
+                    conflicts.map(c => c.message).join('; '),
+                    status
+                ]);
+            });
+            const date = new Date().toISOString().slice(0,10);
+            downloadCSV(`protrain_planned_trainings_${date}.csv`, rows);
+            showToast('✓ Planned Training Report exported');
+        }
+
+        // 2. Trainer Occupancy Matrix
+        function exportTrainerOccupancy() {
+            if (data.trainers.length === 0) { showToast('⚠ No trainers to export', true); return; }
+            if (data.trainings.length === 0 && data.tasks.length === 0) { showToast('⚠ No trainings or tasks to export', true); return; }
+            const { start, end } = getScheduleDateRange();
+            const allDays = getAllDaysInRange(start, end);
+            const header = ['Trainer', ...allDays.map(d => formatDate(d))];
+            const rows = [header];
+            (data.trainers || []).forEach(trainer => {
+                const row = [trainer.name];
+                allDays.forEach(day => {
+                    const dayKey = formatDate(day);
+                    // Check trainings
+                    const training = data.trainings.find(t => {
+                        if (t.trainerId !== trainer.id) return false;
+                        return getTrainingWorkingDays(t).some(wd => formatDate(wd) === dayKey);
+                    });
+                    // Check tasks
+                    const task = !training && data.tasks.find(t => {
+                        if (t.trainerId !== trainer.id) return false;
+                        return getTrainingWorkingDays(t).some(wd => formatDate(wd) === dayKey);
+                    });
+                    if (training) row.push(training.name);
+                    else if (task) row.push('[TASK] ' + task.name);
+                    else if (isWeekend(day)) row.push('WEEKEND');
+                    else if (isHoliday(day)) row.push('HOLIDAY: ' + getHolidayName(day));
+                    else row.push('');
+                });
+                rows.push(row);
+            });
+            const date = new Date().toISOString().slice(0,10);
+            downloadCSV(`protrain_trainer_occupancy_${date}.csv`, rows);
+            showToast('✓ Trainer Occupancy Matrix exported');
+        }
+
+        // 3. Room Occupancy Matrix
+        function exportRoomOccupancy() {
+            if (data.rooms.length === 0) { showToast('⚠ No rooms to export', true); return; }
+            if (data.trainings.length === 0 && data.tasks.length === 0) { showToast('⚠ No trainings or tasks to export', true); return; }
+            const { start, end } = getScheduleDateRange();
+            const allDays = getAllDaysInRange(start, end);
+            const header = ['Room', 'Capacity', ...allDays.map(d => formatDate(d))];
+            const rows = [header];
+            (data.rooms || []).forEach(room => {
+                const row = [room.name, room.capacity];
+                allDays.forEach(day => {
+                    const dayKey = formatDate(day);
+                    const training = data.trainings.find(t => {
+                        if (t.roomId !== room.id) return false;
+                        return getTrainingWorkingDays(t).some(wd => formatDate(wd) === dayKey);
+                    });
+                    const task = !training && data.tasks.find(t => {
+                        if (t.roomId !== room.id) return false;
+                        return getTrainingWorkingDays(t).some(wd => formatDate(wd) === dayKey);
+                    });
+                    if (training) row.push(training.name);
+                    else if (task) row.push('[TASK] ' + task.name);
+                    else if (isWeekend(day)) row.push('WEEKEND');
+                    else if (isHoliday(day)) row.push('HOLIDAY: ' + getHolidayName(day));
+                    else row.push('');
+                });
+                rows.push(row);
+            });
+            const date = new Date().toISOString().slice(0,10);
+            downloadCSV(`protrain_room_occupancy_${date}.csv`, rows);
+            showToast('✓ Room Occupancy Matrix exported');
+        }
+
+        // 4a. Master — Trainers
+        function exportMasterTrainers() {
+            if (data.trainers.length === 0) { showToast('⚠ No trainers to export', true); return; }
+            const rows = [['ID','Name','Expertise','Color']];
+            data.trainers.forEach(t => rows.push([t.id, t.name, t.expertise||'', t.color]));
+            downloadCSV(`protrain_master_trainers_${new Date().toISOString().slice(0,10)}.csv`, rows);
+            showToast('✓ Trainers exported');
+        }
+
+        // 4b. Master — Rooms
+        function exportMasterRooms() {
+            if (data.rooms.length === 0) { showToast('⚠ No rooms to export', true); return; }
+            const rows = [['ID','Name','Capacity','Color']];
+            data.rooms.forEach(r => rows.push([r.id, r.name, r.capacity, r.color]));
+            downloadCSV(`protrain_master_rooms_${new Date().toISOString().slice(0,10)}.csv`, rows);
+            showToast('✓ Rooms exported');
+        }
+
+        // 4c. Master — Holidays
+        function exportMasterHolidays() {
+            if (data.holidays.length === 0) { showToast('⚠ No holidays to export', true); return; }
+            const sorted = [...data.holidays].sort((a,b) => new Date(a.date)-new Date(b.date));
+            const rows = [['ID','Name','Date','Day of Week']];
+            sorted.forEach(h => {
+                const d = parseDate(h.date);
+                rows.push([h.id, h.name, h.date, d.toLocaleDateString('en-US',{weekday:'long'})]);
+            });
+            downloadCSV(`protrain_master_holidays_${new Date().toISOString().slice(0,10)}.csv`, rows);
+            showToast('✓ Holidays exported');
+        }
+
+        
+        // ===================== AVAILABILITY REPORTS =====================
+        let currentAvailabilityReportType = null;
+
+        function openReportDateModal(type) {
+            currentAvailabilityReportType = type;
+            const now = new Date();
+            const startStr = now.toISOString().slice(0,10);
+            
+            const endDate = new Date();
+            endDate.setMonth(endDate.getMonth() + 1);
+            const endStr = endDate.toISOString().slice(0,10);
+            
+            document.getElementById('report-start-date').value = startStr;
+            document.getElementById('report-end-date').value = endStr;
+            
+            document.getElementById('report-date-modal').classList.add('active');
+        }
+
+        function closeReportDateModal() {
+            document.getElementById('report-date-modal').classList.remove('active');
+            currentAvailabilityReportType = null;
+        }
+
+        function generateAvailabilityReport() {
+            const startStr = document.getElementById('report-start-date').value;
+            const endStr = document.getElementById('report-end-date').value;
+            
+            if (!startStr || !endStr) {
+                showToast('⚠ Please select both start and end dates', true);
+                return;
+            }
+            
+            const start = new Date(startStr);
+            const end = new Date(endStr);
+            
+            if (start > end) {
+                showToast('⚠ Start date must be before end date', true);
+                return;
+            }
+
+            const reportType = currentAvailabilityReportType;
+            closeReportDateModal();
+            
+            if (reportType === 'trainer_availability') {
+                exportTrainerAvailability(start, end);
+            } else if (reportType === 'room_availability') {
+                exportRoomAvailability(start, end);
+            }
+        }
+
+        function exportTrainerAvailability(start, end) {
+            if (data.trainers.length === 0) { showToast('⚠ No trainers found', true); return; }
+            
+            const allDays = getAllDaysInRange(start, end);
+            const workingDays = allDays.filter(d => !isWeekend(d) && !isHoliday(d));
+            
+            const bodyRows = [];
+            let maxDates = 0;
+            
+            data.trainers.forEach(trainer => {
+                let bookedDaysCount = 0;
+                let availableDates = [];
+                
+                workingDays.forEach(day => {
+                    const dayKey = formatDate(day);
+                    
+                    const isBookedTraining = data.trainings.some(t => t.trainerId === trainer.id && getTrainingWorkingDays(t).some(wd => formatDate(wd) === dayKey));
+                    const isBookedTask = !isBookedTraining && data.tasks.some(t => t.trainerId === trainer.id && getTrainingWorkingDays(t).some(wd => formatDate(wd) === dayKey));
+                    
+                    if (isBookedTraining || isBookedTask) {
+                        bookedDaysCount++;
+                    } else {
+                        availableDates.push(dayKey);
+                    }
+                });
+                
+                if (availableDates.length > maxDates) maxDates = availableDates.length;
+                
+                bodyRows.push([
+                    trainer.name,
+                    workingDays.length,
+                    bookedDaysCount,
+                    availableDates.length,
+                    ...availableDates
+                ]);
+            });
+            
+            const header = ['Trainer', 'Total Working Days in Range', 'Days Booked', 'Total Available Days'];
+            for (let i = 1; i <= maxDates; i++) {
+                header.push('Date ' + i);
+            }
+            
+            const rows = [header, ...bodyRows];
+            
+            const date = new Date().toISOString().slice(0,10);
+            downloadCSV(`protrain_trainer_availability_${date}.csv`, rows);
+            showToast('✓ Trainer Availability Report exported');
+        }
+
+        function exportRoomAvailability(start, end) {
+            if (data.rooms.length === 0) { showToast('⚠ No rooms found', true); return; }
+            
+            const allDays = getAllDaysInRange(start, end);
+            const workingDays = allDays.filter(d => !isWeekend(d) && !isHoliday(d));
+            
+            const bodyRows = [];
+            let maxDates = 0;
+            
+            data.rooms.forEach(room => {
+                let bookedDaysCount = 0;
+                let availableDates = [];
+                
+                workingDays.forEach(day => {
+                    const dayKey = formatDate(day);
+                    
+                    const isBookedTraining = data.trainings.some(t => t.roomId === room.id && getTrainingWorkingDays(t).some(wd => formatDate(wd) === dayKey));
+                    const isBookedTask = !isBookedTraining && data.tasks.some(t => t.roomId === room.id && getTrainingWorkingDays(t).some(wd => formatDate(wd) === dayKey));
+                    
+                    if (isBookedTraining || isBookedTask) {
+                        bookedDaysCount++;
+                    } else {
+                        availableDates.push(dayKey);
+                    }
+                });
+                
+                if (availableDates.length > maxDates) maxDates = availableDates.length;
+                
+                bodyRows.push([
+                    room.name,
+                    room.capacity,
+                    workingDays.length,
+                    bookedDaysCount,
+                    availableDates.length,
+                    ...availableDates
+                ]);
+            });
+            
+            const header = ['Room', 'Capacity', 'Total Working Days in Range', 'Days Booked', 'Total Available Days'];
+            for (let i = 1; i <= maxDates; i++) {
+                header.push('Date ' + i);
+            }
+            
+            const rows = [header, ...bodyRows];
+            
+            const date = new Date().toISOString().slice(0,10);
+            downloadCSV(`protrain_room_availability_${date}.csv`, rows);
+            showToast('✓ Room Availability Report exported');
+        }
+
+
+        
+        // ===================== PARTICIPANTS =====================
+        let currentParticipantTrainingId = null;
+
+        function pmEscapeHTML(str) {
+            if (!str) return '';
+            return String(str).replace(/[&<>'"]/g, match => {
+                const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' };
+                return map[match];
+            });
+        }
+
+        function openParticipantModal(trainingId) {
+            currentParticipantTrainingId = trainingId;
+            const training = data.trainings.find(t => t.id === trainingId);
+            if (!training) return;
+            
+            if (!training.participants) training.participants = [];
+            
+            document.getElementById('pm-title').textContent = `Participants: ${training.name}`;
+            const fi = document.getElementById('pm-csv-upload'); if (fi) fi.value = '';
+            
+            renderParticipantTable(training);
+            
+            document.getElementById('participant-modal').classList.add('active');
+        }
+
+        function closeParticipantModal() {
+            document.getElementById('participant-modal').classList.remove('active');
+            currentParticipantTrainingId = null;
+        }
+        
+        function renderParticipantTable(training) {
+            const tbody = document.getElementById('pm-tbody');
+            const countSpan = document.getElementById('pm-count');
+            const warnDiv = document.getElementById('pm-capacity-warning');
+            
+            if (!training.participants) training.participants = [];
+            
+            countSpan.textContent = training.participants.length;
+            
+            let capacity = Infinity;
+            if (training.roomId && training.roomId !== NO_ROOM_ID && !training.isOnline) {
+                const room = data.rooms.find(r => r.id === training.roomId);
+                if (room && room.capacity) capacity = parseInt(room.capacity);
+            }
+            
+            if (training.participants.length > capacity) {
+                warnDiv.textContent = `⚠ Exceeds room capacity (${capacity})!`;
+                warnDiv.style.display = 'block';
+            } else {
+                warnDiv.style.display = 'none';
+            }
+            
+            if (training.participants.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-light);padding:20px;">No participants added yet</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = training.participants.map((p, index) => `
+                <tr>
+                    <td>${pmEscapeHTML(p.name || '-')}</td>
+                    <td>${pmEscapeHTML(p.empId || '-')}</td>
+                    <td>${pmEscapeHTML(p.department || '-')}</td>
+                    <td>${pmEscapeHTML(p.email || '-')}</td>
+                    <td style="text-align:right;">
+                        ${isAdmin ? `<button class="btn btn-sm btn-secondary" style="padding:2px 6px; color:var(--danger); border-color:transparent; background:transparent;" onclick="deleteParticipant(${index})" title="Remove">✕</button>` : ''}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function downloadParticipantCSVTemplate() {
+            const template = "Name,Emp ID,Department,Email\nJane Smith,EMP-001,CC Training,jane@example.com\nJohn Doe,EMP-002,Retail Sales,john@example.com";
+            const dataStr = "data:text/csv;charset=utf-8," + encodeURIComponent(template);
+            const dlAnchorElem = document.createElement('a');
+            dlAnchorElem.setAttribute("href", dataStr);
+            dlAnchorElem.setAttribute("download", "participant_template.csv");
+            dlAnchorElem.click();
+        }
+
+        
+        function deleteParticipant(index) {
+            if (!isAdmin) return;
+            const training = data.trainings.find(t => t.id === currentParticipantTrainingId);
+            if (!training || !training.participants) return;
+            
+            if (confirm("Remove this participant?")) {
+                training.participants.splice(index, 1);
+                saveData();
+                renderParticipantTable(training);
+                renderTrainings(); // updates counts in background
+            }
+        }
+
+        function clearAllParticipants() {
+            if (!isAdmin) {
+                showToast("⚠ Permission denied.", true);
+                return;
+            }
+            const training = data.trainings.find(t => t.id === currentParticipantTrainingId);
+            if (!training) return;
+            if (training.participants && training.participants.length > 0) {
+                if (confirm("Are you sure you want to remove all participants from this training?")) {
+                    training.participants = [];
+                    saveData();
+                    renderParticipantTable(training);
+                    renderTrainings();
+                    showToast("✓ Cleared all participants.");
+                }
+            } else {
+                showToast("No participants to clear.");
+            }
+        }
+
+        function uploadParticipantsCSV() {
+            if (!isAdmin) {
+                showToast("⚠ You do not have permission to edit participants.", true);
+                return;
+            }
+            
+            const training = data.trainings.find(t => t.id === currentParticipantTrainingId);
+            if (!training) return;
+            
+            const fileInput = document.getElementById('pm-csv-upload');
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showToast("⚠ Please select a CSV file to upload.", true);
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                const lines = text.split(/\r\n|\n/);
+                const parsed = [];
+                
+                let startIdx = 0;
+                if (lines.length > 0 && lines[0].toLowerCase().includes('name')) {
+                    startIdx = 1; // skip header
+                }
+                
+                for (let i = startIdx; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (!line) continue;
+                    
+                    // Simple CSV split handling quotes
+                    const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(s => s.replace(/^"|"$/g, '').trim());
+                    
+                    parsed.push({
+                        name: parts[0] || '',
+                        empId: parts[1] || '',
+                        department: parts[2] || '',
+                        email: parts[3] || ''
+                    });
+                }
+                
+                let capacity = Infinity;
+                if (training.roomId && training.roomId !== NO_ROOM_ID && !training.isOnline) {
+                    const room = data.rooms.find(r => r.id === training.roomId);
+                    if (room && room.capacity) capacity = parseInt(room.capacity);
+                }
+                
+                if (parsed.length > capacity) {
+                    const addAnyway = confirm(`Warning: You are uploading ${parsed.length} participants, but the room capacity is only ${capacity}.\n\nAre you sure you want to add them anyway?`);
+                    if (!addAnyway) return;
+                }
+                
+                training.participants = parsed;
+                saveData();
+                renderParticipantTable(training);
+                renderTrainings();
+                showToast(`✓ Successfully loaded ${parsed.length} participants from CSV!`);
+                fileInput.value = ''; // reset file input
+            };
+            reader.readAsText(file);
+        }
+
+        
+        // ===================== EXPORT PARTICIPANT ROSTER =====================
+        function exportParticipantRosterReport() {
+            const rows = [
+                ['Training Name', 'Sub-Section', 'Start Date', 'End Date', 'Trainer Name', 'Room Name', 'Participant Name', 'Employee ID', 'Department', 'Email Address']
+            ];
+            
+            let rosterEmpty = true;
+            data.trainings.forEach(t => {
+                if (!t.participants || t.participants.length === 0) return;
+                
+                const tName = t.name || '';
+                const tSubSection = t.subSection || 'Unassigned';
+                const tStart = formatDisplayDate(t.startDate) || '';
+                const tEnd = formatDisplayDate(t.endDate) || '';
+                
+                const trainer = data.trainers.find(tr => tr.id === t.trainerId);
+                const tTrainer = trainer ? trainer.name : 'Unknown';
+                
+                const room = data.rooms.find(r => r.id === t.roomId);
+                const tRoom = room ? room.name : (t.isOnline ? 'Online' : 'Unknown');
+
+                t.participants.forEach(p => {
+                    rosterEmpty = false;
+                    rows.push([
+                        tName, tSubSection, tStart, tEnd, tTrainer, tRoom,
+                        p.name || '', p.empId || '', p.department || '', p.email || ''
+                    ]);
+                });
+            });
+
+            if (rosterEmpty) {
+                showToast("No participants found across any trainings.");
+                return;
+            }
+
+            const date = new Date().toISOString().slice(0, 10);
+            downloadCSV(`protrain_participant_roster_${date}.csv`, rows);
+        }
+
+        // ---- Trainer Occupancy Summary helpers ----
+        function getSchedulePeriodStats() {
+            const allItems = [...data.trainings, ...data.tasks];
+            if (allItems.length === 0) return { totalWorkingDays: 0, periodLabel: '—', start: null, end: null };
+            const starts = allItems.map(t => new Date(t.startDate));
+            const ends   = allItems.map(t => new Date(t.endDate));
+            const start  = new Date(Math.min(...starts));
+            const end    = new Date(Math.max(...ends));
+            // Count working days (Mon–Fri, excl. holidays) across the full period
+            const allDays = getAllDaysInRange(start, end);
+            const workingDays = allDays.filter(d => !isWeekend(d) && !isHoliday(d));
+            const fmt = d => d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+            return {
+                totalWorkingDays: workingDays.length,
+                periodLabel: `${fmt(start)} – ${fmt(end)}`,
+                start, end
+            };
+        }
+
+        function buildTrainerOccupancyRows() {
+            const { totalWorkingDays } = getSchedulePeriodStats();
+            return data.trainers.map(trainer => {
+                const trainerTrainings = data.trainings.filter(t => t.trainerId === trainer.id);
+                const sessions = trainerTrainings.length;
+                // Collect all unique working days this trainer is booked (handles overlapping sessions)
+                const bookedDaySet = new Set();
+                let totalHours = 0;
+                trainerTrainings.forEach(t => {
+                    const wd = getTrainingWorkingDays(t);
+                    const hpd = t.hoursPerDay || 8;
+                    wd.forEach(d => bookedDaySet.add(formatDate(d)));
+                    totalHours += wd.length * hpd;
+                });
+                const trainingDays = bookedDaySet.size;
+                const occupancyPct = totalWorkingDays > 0 ? (trainingDays / totalWorkingDays) * 100 : 0;
+                return { name: trainer.name, expertise: trainer.expertise || '', sessions, trainingDays, totalHours, occupancyPct };
+            }).sort((a, b) => b.occupancyPct - a.occupancyPct); // highest first
+        }
+
+        // 5. Trainer Occupancy Summary CSV
+        function exportTrainerOccupancySummary() {
+            if (data.trainers.length === 0) { showToast('⚠ No trainers to export', true); return; }
+            if (data.trainings.length === 0) { showToast('⚠ No trainings scheduled yet', true); return; }
+            const { totalWorkingDays, periodLabel } = getSchedulePeriodStats();
+            const rows = [[
+                'Trainer Name', 'Expertise',
+                'Sessions Scheduled', 'Training Days (Booked)',
+                'Total Training Hours', 'Total Working Days in Period',
+                'Occupancy %', 'Utilisation Level'
+            ]];
+            buildTrainerOccupancyRows().forEach(r => {
+                const level = r.occupancyPct >= 90 ? 'Overloaded' : r.occupancyPct >= 70 ? 'High' : r.occupancyPct >= 40 ? 'Healthy' : 'Low';
+                rows.push([
+                    r.name, r.expertise,
+                    r.sessions, r.trainingDays,
+                    r.totalHours % 1 === 0 ? r.totalHours : r.totalHours.toFixed(1),
+                    totalWorkingDays,
+                    r.occupancyPct.toFixed(1) + '%',
+                    level
+                ]);
+            });
+            // Append period info as a note row
+            rows.push([]);
+            rows.push(['Schedule Period:', periodLabel, '', '', '', '', '', '']);
+            rows.push(['Generated:', new Date().toLocaleString(), '', '', '', '', '', '']);
+            downloadCSV(`protrain_trainer_occupancy_summary_${new Date().toISOString().slice(0,10)}.csv`, rows);
+            showToast('✓ Trainer Occupancy Summary exported');
+        }
+
+        // ===================== BATCH AUTO-SCHEDULER =====================
+        // Sentinel IDs for unassigned trainer/room
+        const NO_TRAINER_ID = '__NO_TRAINER__';
+        const NO_ROOM_ID    = '__NO_ROOM__';
+        const SUB_SECTIONS  = ['CC Training', 'Retail Sales', 'Field Training'];
+        const SS_META = {
+            'CC Training':  { cls: 'ss-cc',     label: 'CC Training'  },
+            'Retail Sales': { cls: 'ss-retail',  label: 'Retail Sales' },
+            'Field Training':{ cls: 'ss-field',  label: 'Field Training' },
+        };
+        function ssLabel(subSection) {
+            const m = SS_META[subSection];
+            if (m) return `<span class="ss-pill ${m.cls}">${m.label}</span>`;
+            return `<span class="ss-pill ss-unassigned">Unassigned</span>`;
+        }
+
+        function openBatchScheduler() {
+            // Build trainer pool cards
+            const trainerCards = data.trainers.length === 0
+                ? '<div style="font-size:12px;color:var(--text-light);">No trainers added yet.</div>'
+                : data.trainers.map(t => `
+                    <div class="pool-card selected" data-id="${t.id}" data-type="trainer" onclick="togglePoolCard(this)">
+                        <div class="pool-check"></div>
+                        <span class="color-dot" style="background:${t.color};width:10px;height:10px;border-radius:50%;flex-shrink:0;"></span>
+                        <div class="pool-card-info">
+                            <span class="pool-card-name">${t.name}</span>
+                            <span class="pool-card-sub">${t.expertise || 'Trainer'}</span>
+                        </div>
+                    </div>`).join('');
+
+            // Build room pool cards
+            const roomCards = data.rooms.length === 0
+                ? '<div style="font-size:12px;color:var(--text-light);">No rooms added yet.</div>'
+                : data.rooms.map(r => `
+                    <div class="pool-card selected" data-id="${r.id}" data-type="room" onclick="togglePoolCard(this)">
+                        <div class="pool-check"></div>
+                        <span class="color-dot" style="background:${r.color};width:10px;height:10px;border-radius:50%;flex-shrink:0;"></span>
+                        <div class="pool-card-info">
+                            <span class="pool-card-name">${r.name}</span>
+                            <span class="pool-card-sub">Capacity: ${r.capacity}</span>
+                        </div>
+                    </div>`).join('');
+
+            openModal('Batch Auto-Scheduler', `
+                <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;font-size:13px;color:#4f46e5;">
+                    <strong>📋 Batch Auto-Scheduler</strong> — paste a list of batches. The app will auto-assign available trainers and rooms. Where none are free, the batch is still plotted with a conflict indicator.
+                </div>
+
+                <div class="batch-mode-tabs">
+                    <button class="batch-mode-tab active" id="btab-a" onclick="switchBatchTab('a')">Mode A — Auto Assign Best Fit</button>
+                    <button class="batch-mode-tab" id="btab-b" onclick="switchBatchTab('b')">Mode B — Select Pool & Auto Assign</button>
+                </div>
+
+                <!-- Mode A -->
+                <div id="bpanel-a">
+                    <p style="font-size:12px;color:var(--text-light);margin-bottom:8px;">
+                        Columns: <strong>batch_name, start_date (DD-MM-YYYY), duration_days, hours_per_day (optional), color (optional)</strong>
+                    </p>
+                    <textarea class="bulk-textarea" id="batch-csv-a" placeholder="Batch IC-8 MVN B1,01-06-2026,10,8,#2563eb&#10;Batch IC-8 MVN B2,15-06-2026,5,6,#16a34a&#10;Batch IC-8 MVN B3,01-07-2026,8" spellcheck="false"></textarea>
+                </div>
+
+                <!-- Mode B -->
+                <div id="bpanel-b" style="display:none;">
+
+                    <div style="background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:14px;">
+
+                        <div class="pool-section">
+                            <div class="pool-section-title">
+                                <span>👤 Trainer Pool — select who is available for this batch run</span>
+                                <span>
+                                    <a onclick="selectAllPool('trainer', true)">All</a> &nbsp;|&nbsp;
+                                    <a onclick="selectAllPool('trainer', false)">None</a>
+                                </span>
+                            </div>
+                            <div class="pool-cards" id="trainer-pool-cards">${trainerCards}</div>
+                        </div>
+
+                        <div class="pool-section" style="margin-bottom:0;">
+                            <div class="pool-section-title">
+                                <span>🏠 Room Pool — select which rooms are available</span>
+                                <span>
+                                    <a onclick="selectAllPool('room', true)">All</a> &nbsp;|&nbsp;
+                                    <a onclick="selectAllPool('room', false)">None</a>
+                                </span>
+                            </div>
+                            <div class="pool-cards" id="room-pool-cards">${roomCards}</div>
+                        </div>
+
+                    </div>
+
+                    <p style="font-size:12px;color:var(--text-light);margin-bottom:8px;">
+                        Columns: <strong>batch_name, start_date (DD-MM-YYYY), duration_days, hours_per_day (optional), color (optional)</strong>
+                    </p>
+                    <textarea class="bulk-textarea" id="batch-csv-b" placeholder="Batch IC-9 OPS B1,01-06-2026,10,8,#9333ea&#10;Batch IC-9 OPS B2,15-06-2026,5,6,#ea580c&#10;Batch IC-9 OPS B3,01-07-2026,8" spellcheck="false"></textarea>
+                </div>
+
+                <div style="display:flex;gap:8px;margin-top:10px;">
+                    <button class="btn btn-secondary btn-sm" onclick="downloadBatchTemplate()">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Download Template
+                    </button>
+                    <button class="btn btn-batch btn-sm" onclick="previewBatchSchedule()">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        Preview Schedule
+                    </button>
+                </div>
+
+                <div id="batch-preview-area" style="margin-top:14px;"></div>
+            `, () => commitBatchSchedule());
+
+            document.getElementById('modal-save').textContent = 'Plot All Batches';
+            document.getElementById('modal-save').style.display = 'none';
+            window._batchMode = 'a';
+            window._batchResolved = [];
+        }
+
+        window.togglePoolCard = function(card) {
+            card.classList.toggle('selected');
+        };
+
+        window.selectAllPool = function(type, selectAll) {
+            const containerId = type === 'trainer' ? 'trainer-pool-cards' : 'room-pool-cards';
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.querySelectorAll('.pool-card').forEach(c => {
+                c.classList.toggle('selected', selectAll);
+            });
+        };
+
+        function getSelectedPoolIds(type) {
+            const containerId = type === 'trainer' ? 'trainer-pool-cards' : 'room-pool-cards';
+            const container = document.getElementById(containerId);
+            if (!container) return null; // null means "use all" (Mode A)
+            const selected = [...container.querySelectorAll('.pool-card.selected')].map(c => c.dataset.id);
+            return selected;
+        }
+
+        window.switchBatchTab = function(tab) {
+            document.getElementById('bpanel-a').style.display = tab === 'a' ? 'block' : 'none';
+            document.getElementById('bpanel-b').style.display = tab === 'b' ? 'block' : 'none';
+            document.getElementById('btab-a').classList.toggle('active', tab === 'a');
+            document.getElementById('btab-b').classList.toggle('active', tab === 'b');
+            window._batchMode = tab;
+            // Clear preview when switching modes
+            document.getElementById('batch-preview-area').innerHTML = '';
+            document.getElementById('modal-save').style.display = 'none';
+        };
+
+        window.downloadBatchTemplate = function() {
+            const modeA = 'batch_name,section,start_date,duration_days,hours_per_day,color\nBatch IC-8 MVN B1,MVN,01-06-2026,10,8,#2563eb\nBatch IC-8 MVN B2,MVN,15-06-2026,5,6,#16a34a';
+            const modeB = 'batch_name,section,start_date,duration_days,hours_per_day,color\nBatch IC-9 OPS B1,OPS,01-06-2026,10,8,#9333ea\nBatch IC-9 OPS B2,OPS,15-06-2026,5,6,#ea580c\nBatch IC-9 OPS B3,OPS,01-07-2026,8,,#0891b2';
+            const content = '=== MODE A: Auto Assign Best Fit (searches all resources) ===\n' + modeA +
+                '\n\n=== MODE B: Pool-Based Auto Assign (select trainers & rooms in the UI) ===\n' + modeB;
+            const blob = new Blob([content], { type: 'text/csv' });
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+            a.download = 'protrain_batch_template.csv'; a.click();
+        };
+
+        // Core availability check: returns trainer IDs free for ALL given working days
+        function findAvailableTrainers(workDayKeys, excludeTrainingId = null) {
+            return data.trainers.filter(trainer => {
+                const occupied = getOccupiedDates('trainer', trainer.id, excludeTrainingId);
+                return workDayKeys.every(k => !occupied.has(k));
+            });
+        }
+
+        function findAvailableRooms(workDayKeys, excludeTrainingId = null) {
+            return data.rooms.filter(room => {
+                const occupied = getOccupiedDates('room', room.id, excludeTrainingId);
+                return workDayKeys.every(k => !occupied.has(k));
+            });
+        }
+
+        function getWorkingDayKeysForBatch(startDate, durationDays) {
+            const endDate = formatDate(addWorkingDays(startDate, durationDays - 1));
+            return getWorkingDaysBetween(startDate, endDate).map(d => formatDate(d));
+        }
+
+        window.previewBatchSchedule = function() {
+            window._trainerOccMap = null; // Reset for workload balancing recalculation
+            const mode = window._batchMode;
+            const csvText = (mode === 'a'
+                ? document.getElementById('batch-csv-a')
+                : document.getElementById('batch-csv-b'))?.value?.trim();
+
+            if (!csvText) {
+                document.getElementById('batch-preview-area').innerHTML =
+                    '<div style="color:var(--danger);font-size:13px;">⚠ No data entered.</div>';
+                return;
+            }
+
+            // Mode B: read selected pool IDs from the checklist
+            let poolTrainerIds = null; // null = use all (Mode A)
+            let poolRoomIds    = null;
+            if (mode === 'b') {
+                poolTrainerIds = getSelectedPoolIds('trainer');
+                poolRoomIds    = getSelectedPoolIds('room');
+                if (poolTrainerIds.length === 0 && poolRoomIds.length === 0) {
+                    document.getElementById('batch-preview-area').innerHTML =
+                        '<div style="color:var(--danger);font-size:13px;">⚠ No trainers or rooms selected in the pool. Please select at least one of each.</div>';
+                    return;
+                }
+            }
+
+            let rows = parseCSV(csvText);
+            let idxMap = { batch_name: 0, section: 1, start_date: 2, duration_days: 3, hours_per_day: 4, color: 5 };
+            
+            if (rows.length > 0) {
+                const firstCol1 = rows[0][1]?.trim() || '';
+                // If it's the old format without a section column, column 1 is the date
+                if (normaliseDate(firstCol1)) {
+                    idxMap = { batch_name: 0, start_date: 1, duration_days: 2, hours_per_day: 3, color: 4, section: -1 };
+                }
+            }
+
+            const knownHeaders = ['batch_name','name','start_date','duration_days','section','sub_section'];
+            
+            if (rows.length > 0 && knownHeaders.some(h => rows[0].map(c => c.toLowerCase().trim()).includes(h))) {
+                const headers = rows[0].map(c => c.toLowerCase().trim());
+                if (headers.indexOf('batch_name') > -1) idxMap.batch_name = headers.indexOf('batch_name');
+                else if (headers.indexOf('name') > -1) idxMap.batch_name = headers.indexOf('name');
+                if (headers.indexOf('start_date') > -1) idxMap.start_date = headers.indexOf('start_date');
+                if (headers.indexOf('duration_days') > -1) idxMap.duration_days = headers.indexOf('duration_days');
+                if (headers.indexOf('hours_per_day') > -1) idxMap.hours_per_day = headers.indexOf('hours_per_day');
+                if (headers.indexOf('color') > -1) idxMap.color = headers.indexOf('color');
+                if (headers.indexOf('section') > -1) idxMap.section = headers.indexOf('section');
+                else if (headers.indexOf('sub_section') > -1) idxMap.section = headers.indexOf('sub_section');
+                rows = rows.slice(1);
+            }
+
+            const resolved = [];
+            const tempOccupiedTrainer = new Map();
+            const tempOccupiedRoom    = new Map();
+
+            rows.forEach((cols, idx) => {
+                const batchName   = cols[idxMap.batch_name]?.trim();
+                const startDate   = normaliseDate(cols[idxMap.start_date]);
+                const duration    = parseInt(cols[idxMap.duration_days]) || 0;
+                const hoursPerDay = parseFloat(cols[idxMap.hours_per_day]) || 8;
+                const colorVal    = cols[idxMap.color]?.trim();
+                const color = (colorVal && /^#[0-9a-fA-F]{3,6}$/.test(colorVal)) ? colorVal : COLORS[idx % COLORS.length];
+                const section = idxMap.section > -1 ? cols[idxMap.section]?.trim() : '';
+
+                const errors = [];
+                if (!batchName) errors.push('Batch name required');
+                if (!startDate) errors.push(`Invalid start date format: ${cols[idxMap.start_date]}`);
+                if (!duration || duration < 1) errors.push('Duration must be ≥ 1');
+
+                if (errors.length > 0) {
+                    resolved.push({ batchName: batchName || `Row ${idx+1}`, error: errors.join(', ') });
+                    return;
+                }
+
+                const wdKeys  = getWorkingDayKeysForBatch(startDate, duration);
+                const endDate = formatDate(addWorkingDays(startDate, duration - 1));
+
+                function isTrainerFreeForBatch(trainerId) {
+                    const occupied = getOccupiedDates('trainer', trainerId);
+                    const tempSet  = tempOccupiedTrainer.get(trainerId) || new Set();
+                    return wdKeys.every(k => !occupied.has(k) && !tempSet.has(k));
+                }
+                function isRoomFreeForBatch(roomId) {
+                    const occupied = getOccupiedDates('room', roomId);
+                    const tempSet  = tempOccupiedRoom.get(roomId) || new Set();
+                    return wdKeys.every(k => !occupied.has(k) && !tempSet.has(k));
+                }
+
+                let assignedTrainer = null;
+                let assignedRoom    = null;
+                let trainerNote = '';
+                let roomNote    = '';
+
+                // Precalculate occupancy for workload balancing
+                if (!window._trainerOccMap) {
+                    window._trainerOccMap = new Map();
+                    data.trainers.forEach(t => {
+                        let days = 0;
+                        data.trainings.filter(x => x.trainerId === t.id).forEach(x => days += getTrainingWorkingDays(x).length);
+                        window._trainerOccMap.set(t.id, days);
+                    });
+                }
+
+                const getBestTrainer = (pool) => {
+                    return pool.filter(t => isTrainerFreeForBatch(t.id)).sort((a,b) => {
+                        // 1. Expertise Match (if batch name contains expertise)
+                        const aExp = (a.expertise || '').toLowerCase();
+                        const bExp = (b.expertise || '').toLowerCase();
+                        const bn = batchName.toLowerCase();
+                        const aMatch = (aExp && bn.includes(aExp)) ? 1 : 0;
+                        const bMatch = (bExp && bn.includes(bExp)) ? 1 : 0;
+                        if (aMatch !== bMatch) return bMatch - aMatch;
+                        
+                        // 2. Workload Balancing (least occupied first)
+                        const aOcc = window._trainerOccMap.get(a.id) || 0;
+                        const bOcc = window._trainerOccMap.get(b.id) || 0;
+                        return aOcc - bOcc;
+                    })[0] || null;
+                };
+
+                if (mode === 'a') {
+                    // Mode A: search all trainers/rooms using Best Fit heuristics
+                    assignedTrainer = getBestTrainer(data.trainers);
+                    assignedRoom    = data.rooms.find(r => isRoomFreeForBatch(r.id)) || null;
+                    if (!assignedTrainer) trainerNote = 'No trainer available';
+                    if (!assignedRoom)    roomNote    = 'No room available';
+                } else {
+                    // Mode B: search only within selected pool using Best Fit heuristics
+                    const poolTrainers = data.trainers.filter(t => poolTrainerIds.includes(t.id));
+                    const poolRooms    = data.rooms.filter(r => poolRoomIds.includes(r.id));
+
+                    assignedTrainer = getBestTrainer(poolTrainers);
+                    assignedRoom    = poolRooms.find(r => isRoomFreeForBatch(r.id)) || null;
+
+                    if (!assignedTrainer) {
+                        trainerNote = poolTrainers.length === 0
+                            ? 'No trainers in pool'
+                            : `All ${poolTrainers.length} pool trainer(s) busy on these days`;
+                    }
+                    if (!assignedRoom) {
+                        roomNote = poolRooms.length === 0
+                            ? 'No rooms in pool'
+                            : `All ${poolRooms.length} pool room(s) occupied on these days`;
+                    }
+                }
+
+                // Mark days taken for subsequent batches in this run
+                if (assignedTrainer) {
+                    if (!tempOccupiedTrainer.has(assignedTrainer.id)) tempOccupiedTrainer.set(assignedTrainer.id, new Set());
+                    wdKeys.forEach(k => tempOccupiedTrainer.get(assignedTrainer.id).add(k));
+                }
+                if (assignedRoom) {
+                    if (!tempOccupiedRoom.has(assignedRoom.id)) tempOccupiedRoom.set(assignedRoom.id, new Set());
+                    wdKeys.forEach(k => tempOccupiedRoom.get(assignedRoom.id).add(k));
+                }
+
+                const statusLevel = (!assignedTrainer && !assignedRoom) ? 'err'
+                    : (!assignedTrainer || !assignedRoom) ? 'warn' : 'ok';
+
+                resolved.push({
+                    batchName, section, startDate, endDate, duration, hoursPerDay, color,
+                    assignedTrainer, assignedRoom,
+                    trainerNote, roomNote, statusLevel, wdKeys
+                });
+            });
+
+            window._batchResolved = resolved;
+
+            // Pool summary for Mode B
+            let poolSummaryHtml = '';
+            if (mode === 'b') {
+                const poolTrainers = data.trainers.filter(t => (poolTrainerIds||[]).includes(t.id));
+                const poolRooms    = data.rooms.filter(r => (poolRoomIds||[]).includes(r.id));
+                poolSummaryHtml = `
+                    <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:var(--radius);padding:8px 12px;margin-bottom:10px;font-size:12px;color:#4f46e5;">
+                        <strong>Pool used:</strong>
+                        Trainers: ${poolTrainers.map(t => t.name).join(', ') || '—'} &nbsp;|&nbsp;
+                        Rooms: ${poolRooms.map(r => r.name).join(', ') || '—'}
+                    </div>`;
+            }
+
+            // Render preview table
+            const okCount   = resolved.filter(r => r.statusLevel === 'ok').length;
+            const warnCount = resolved.filter(r => r.statusLevel === 'warn').length;
+            const errCount  = resolved.filter(r => r.statusLevel === 'err' || r.error).length;
+
+            let html = `
+                ${poolSummaryHtml}
+                <div style="display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap;">
+                    <span class="batch-assign-badge badge-assigned">✓ ${okCount} fully assigned</span>
+                    <span class="batch-assign-badge badge-partial">⚠ ${warnCount} partial</span>
+                    <span class="batch-assign-badge badge-unassigned">✕ ${errCount} unassigned / errors</span>
+                </div>
+                <div style="overflow-x:auto;">
+                <table class="batch-preview-table">
+                    <thead><tr>
+                        <th>#</th><th>Batch Name</th><th>Start</th><th>End</th>
+                        <th>Days</th><th>Hrs/Day</th><th>Trainer</th><th>Room</th><th>Status</th>
+                    </tr></thead>
+                    <tbody>
+                        ${resolved.map((r, i) => {
+                            if (r.error) return `
+                                <tr>
+                                    <td>${i+1}</td>
+                                    <td><strong>${r.batchName}</strong></td>
+                                    <td colspan="7"><span class="batch-status-err">❌ ${r.error}</span></td>
+                                </tr>`;
+                            const trainerCell = r.assignedTrainer
+                                ? `<span style="color:#166534;">${r.assignedTrainer.name}</span>${r.trainerNote ? `<br><span style="font-size:10px;color:#ea580c;">${r.trainerNote}</span>` : ''}`
+                                : `<span style="color:#dc2626;">⚠ No Trainer</span>${r.trainerNote ? `<br><span style="font-size:10px;color:#dc2626;">${r.trainerNote}</span>` : ''}`;
+                            const roomCell = r.assignedRoom
+                                ? `<span style="color:#166534;">${r.assignedRoom.name}</span>${r.roomNote ? `<br><span style="font-size:10px;color:#ea580c;">${r.roomNote}</span>` : ''}`
+                                : `<span style="color:#dc2626;">⚠ No Room</span>${r.roomNote ? `<br><span style="font-size:10px;color:#dc2626;">${r.roomNote}</span>` : ''}`;
+                            const statusHtml = r.statusLevel === 'ok'
+                                ? '<span class="batch-status-ok">✓ Fully Assigned</span>'
+                                : r.statusLevel === 'warn'
+                                    ? '<span class="batch-status-warn">⚠ Partial</span>'
+                                    : '<span class="batch-status-err">✕ Unassigned</span>';
+                            const colorDot = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${r.color};margin-right:5px;vertical-align:middle;"></span>`;
+                            return `<tr>
+                                <td>${i+1}</td>
+                                <td><strong>${colorDot}${r.batchName}</strong></td>
+                                <td>${r.startDate}</td>
+                                <td>${r.endDate}</td>
+                                <td>${r.duration}</td>
+                                <td>${r.hoursPerDay}h</td>
+                                <td>${trainerCell}</td>
+                                <td>${roomCell}</td>
+                                <td>${statusHtml}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+                </div>
+                <div style="margin-top:10px;font-size:12px;color:var(--text-light);">
+                    Batches with ⚠ or ✕ will still be plotted on the Gantt — they will show with a blinking conflict indicator until manually resolved.
+                </div>`;
+
+            document.getElementById('batch-preview-area').innerHTML = html;
+
+            // Show the confirm button only if there are valid rows
+            if (resolved.filter(r => !r.error).length > 0) {
+                document.getElementById('modal-save').style.display = 'inline-flex';
+            }
+        };
+
+        function commitBatchSchedule() {
+            const resolved = window._batchResolved || [];
+            let plotted = 0;
+            resolved.forEach(r => {
+                if (r.error) return;
+                const training = {
+                    id: generateId('tr'),
+                    name: r.batchName,
+                    subSection: r.section || '',
+                    trainerId: r.assignedTrainer ? r.assignedTrainer.id : NO_TRAINER_ID,
+                    roomId:    r.assignedRoom    ? r.assignedRoom.id    : NO_ROOM_ID,
+                    startDate: r.startDate,
+                    endDate:   r.endDate,
+                    hoursPerDay: r.hoursPerDay,
+                    includedDates: [],
+                    color: r.color
+                };
+                data.trainings.push(training);
+                plotted++;
+            });
+            saveData();
+            closeModal();
+            navigateTo('gantt');
+            showToast(`✓ ${plotted} batch(es) plotted on the Gantt`);
+        }
+
+        // ===================== SIDEBAR TOGGLE =====================
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const collapsed = sidebar.classList.toggle('collapsed');
+            localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
+        }
+        // Restore sidebar state on load
+        (function() {
+            if (localStorage.getItem('sidebarCollapsed') === '1') {
+                const s = document.getElementById('sidebar');
+                if (s) s.classList.add('collapsed');
+            }
+        })();
+
+        // ===================== CONFLICT SAVE HELPERS =====================
+        function commitSaveTraining(training, editingId) {
+            if (editingId) {
+                const idx = data.trainings.findIndex(t => t.id === editingId);
+                if (idx !== -1) data.trainings[idx] = training;
+            } else {
+                data.trainings.push(training);
+            }
+            saveData();
+            closeModal();
+            renderPage();
+        }
+
+        window.forceSaveTraining = function() {
+            if (!window._pendingSaveTraining) return;
+            const { training, editingId } = window._pendingSaveTraining;
+            window._pendingSaveTraining = null;
+            document.getElementById('conflict-save-overlay').classList.remove('active');
+            commitSaveTraining(training, editingId);
+            showToast('⚠ Saved with conflicts — check the Trainings tab for details');
+        };
+
+        window.closeConflictSave = function() {
+            document.getElementById('conflict-save-overlay').classList.remove('active');
+            window._pendingSaveTraining = null;
+        };
+
+        // ===================== CONFLICT POPOVER =====================
+        let _popoverPinned  = false;
+        let _popoverHoverTid = null;
+
+        function getConflictMessages(id, isTask) {
+            const col = isTask ? data.tasks : data.trainings;
+            const t = col.find(x => x.id === id);
+            if (!t) return [];
+            return checkConflicts(t);
+        }
+
+        function showConflictPopover(x, y, msgs, pinned) {
+            const pop = document.getElementById('conflict-popover');
+            document.getElementById('conflict-popover-body').innerHTML =
+                msgs.length ? msgs.map(c => `<div class="cpop-item">${c.message}</div>`).join('') : '<div>No details available</div>';
+            pop.classList.toggle('pinned', pinned);
+            pop.classList.add('visible');
+            // Position smartly — flip left if near right edge
+            const pw = 310;
+            const left = (x + pw + 12 > window.innerWidth) ? x - pw - 4 : x + 12;
+            const top  = Math.min(y, window.innerHeight - 160);
+            pop.style.left = left + 'px';
+            pop.style.top  = top  + 'px';
+        }
+
+        window.closeConflictPopover = function() {
+            const pop = document.getElementById('conflict-popover');
+            pop.classList.remove('visible', 'pinned');
+            _popoverPinned = false;
+        };
+
+        window.hoverConflictBadge = function(e, btn) {
+            if (_popoverPinned) return;
+            const id     = btn.dataset.id;
+            const isTask = btn.dataset.task === 'true';
+            const msgs   = getConflictMessages(id, isTask);
+            showConflictPopover(e.clientX, e.clientY, msgs, false);
+        };
+
+        window.unhoverConflictBadge = function() {
+            if (_popoverPinned) return;
+            const pop = document.getElementById('conflict-popover');
+            pop.classList.remove('visible');
+        };
+
+        window.pinConflictBadge = function(e, btn) {
+            e.stopPropagation();
+            const id     = btn.dataset.id;
+            const isTask = btn.dataset.task === 'true';
+            const msgs   = getConflictMessages(id, isTask);
+            _popoverPinned = true;
+            showConflictPopover(e.clientX, e.clientY, msgs, true);
+        };
+
+        // Close pinned popover when clicking elsewhere
+        document.addEventListener('click', e => {
+            if (_popoverPinned && !e.target.closest('.conflict-popover') && !e.target.closest('.conflict-badge')) {
+                closeConflictPopover();
+            }
+        });
+
+        // ===================== DRAG & DROP GANTT =====================
+        const DAY_WIDTH = 44;
+        let dragState  = null;
+        let dragPending = null;
+
+        function attachDragListeners(barEl, trainingId, isTask) {
+            if (!isAdmin) return;
+            barEl.classList.add('draggable');
+
+            // Remove the inline onclick — we handle both click and drag here
+            barEl.removeAttribute('onclick');
+
+            barEl.addEventListener('mousedown', e => startDrag(e, barEl, trainingId, isTask));
+
+            barEl.addEventListener('click', e => {
+                // If a real drag happened, swallow the click
+                if (barEl._wasDragged) {
+                    barEl._wasDragged = false;
+                    e.stopImmediatePropagation();
+                    return;
+                }
+                // Otherwise treat as a normal click → open edit modal
+                editTraining(trainingId);
+            });
+        }
+
+        function startDrag(e, barEl, trainingId, isTask) {
+            if (e.button !== 0) return;
+            // NOTE: do NOT call e.preventDefault() here — it kills the subsequent click event
+
+            const training = isTask
+                ? data.tasks.find(t => t.id === trainingId)
+                : data.trainings.find(t => t.id === trainingId);
+            if (!training) return;
+
+            const scrollArea = document.querySelector('.gantt-scroll-area');
+            if (!scrollArea) return;
+
+            const dayHeaders = [...document.querySelectorAll('.gantt-day-header')];
+            const ganttDays  = dayHeaders.map(h => h.dataset.dateKey).filter(Boolean);
+            if (ganttDays.length === 0) return;
+
+            const entityType = ganttView === 'rooms' ? 'roomId' : 'trainerId';
+            const entities   = ganttView === 'rooms' ? data.rooms : data.trainers;
+            const currentEnt = entities.findIndex(ent => ent.id === training[entityType]);
+            const workDuration = getTrainingWorkingDays(training).length;
+
+            // Ghost element
+            const ghost = document.createElement('div');
+            ghost.id = 'drag-ghost';
+            ghost.style.cssText = `background:${training.color||'#2563eb'};height:32px;width:${barEl.offsetWidth}px;border-radius:6px;display:none;align-items:center;padding:0 10px;font-size:12px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,0.28);opacity:0.92;position:fixed;pointer-events:none;z-index:9000;`;
+            ghost.textContent = training.name;
+            document.body.appendChild(ghost);
+            hideTooltip();
+
+            dragState = {
+                trainingId, isTask,
+                barEl, ghostEl: ghost,
+                workDuration, rowIndex: currentEnt,
+                ganttDays, ganttEntities: entities, entityType,
+                proposedStart:    training.startDate,
+                proposedEntityId: training[entityType],
+                startX: e.clientX, startY: e.clientY,
+                dragActivated: false,
+            };
+
+            moveGhost(e.clientX, e.clientY);
+            document.addEventListener('mousemove', onDragMove);
+            document.addEventListener('mouseup',   onDragEnd);
+        }
+
+        function moveGhost(cx, cy) {
+            const g = document.getElementById('drag-ghost');
+            if (g) { g.style.left = (cx + 8) + 'px'; g.style.top = (cy - 16) + 'px'; }
+        }
+
+        function onDragMove(e) {
+            if (!dragState) return;
+
+            // Only activate drag after moving 5px — preserves click behaviour
+            if (!dragState.dragActivated) {
+                const dx = Math.abs(e.clientX - dragState.startX);
+                const dy = Math.abs(e.clientY - dragState.startY);
+                if (dx < 5 && dy < 5) return;
+                dragState.dragActivated = true;
+                dragState.barEl.classList.add('dragging');
+                hideTooltip();
+                // Only now make ghost visible
+                const g = document.getElementById('drag-ghost');
+                if (g) g.style.display = 'flex';
+            }
+
+            moveGhost(e.clientX, e.clientY);
+
+            const scrollArea = document.querySelector('.gantt-scroll-area');
+            if (!scrollArea) return;
+
+            // Auto-scroll near edges
+            const rect = scrollArea.getBoundingClientRect();
+            if (e.clientX > rect.right  - 60) scrollArea.scrollLeft += 8;
+            if (e.clientX < rect.left   + 60) scrollArea.scrollLeft -= 8;
+
+            // Which day column?
+            const labels = document.querySelector('.gantt-labels');
+            const labelW = labels ? labels.offsetWidth : 200;
+            const tx = e.clientX - rect.left - labelW + scrollArea.scrollLeft;
+            const dayIdx = Math.max(0, Math.min(Math.floor(tx / DAY_WIDTH), dragState.ganttDays.length - 1));
+            dragState.proposedStart = dragState.ganttDays[dayIdx];
+
+            // Which row?
+            const rows = [...document.querySelectorAll('.gantt-row')];
+            rows.forEach((row, i) => {
+                const r = row.getBoundingClientRect();
+                if (e.clientY >= r.top && e.clientY <= r.bottom) {
+                    dragState.proposedEntityId = dragState.ganttEntities[i]?.id || dragState.proposedEntityId;
+                }
+                row.classList.toggle('drag-target-row',
+                    e.clientY >= r.top && e.clientY <= r.bottom);
+            });
+        }
+
+        function onDragEnd(e) {
+            document.removeEventListener('mousemove', onDragMove);
+            document.removeEventListener('mouseup',   onDragEnd);
+            if (!dragState) return;
+
+            const { barEl, dragActivated, trainingId, isTask,
+                    proposedStart, proposedEntityId, entityType, ganttEntities, workDuration } = dragState;
+
+            const g = document.getElementById('drag-ghost');
+            if (g) g.remove();
+            barEl.classList.remove('dragging');
+            document.querySelectorAll('.gantt-row').forEach(r => r.classList.remove('drag-target-row'));
+
+            // If mouse never moved past threshold — treat as a normal click, let onclick fire
+            if (!dragActivated) {
+                dragState = null;
+                return;
+            }
+
+            const training = isTask
+                ? data.tasks.find(t => t.id === trainingId)
+                : data.trainings.find(t => t.id === trainingId);
+            if (!training) { dragState = null; return; }
+
+            const entityChanged = proposedEntityId !== training[entityType];
+            const dateChanged   = proposedStart    !== training.startDate;
+            if (!dateChanged && !entityChanged) { dragState = null; return; }
+
+            barEl._wasDragged = true;
+
+            const newStart = proposedStart;
+            const newEnd   = formatDate(addWorkingDays(newStart, workDuration - 1));
+
+            const provisional = {
+                ...training,
+                startDate: newStart, endDate: newEnd,
+                [entityType]: proposedEntityId,
+                includedDates: [],
+            };
+            const conflicts = checkConflicts(provisional, trainingId);
+
+            const entName     = ganttEntities.find(x => x.id === proposedEntityId)?.name || '—';
+            const origEntName = ganttEntities.find(x => x.id === training[entityType])?.name || '—';
+
+            let detail = `<strong>${training.name}</strong> will be moved to:<br>`;
+            detail += `📅 <strong>${formatDisplayDate(newStart)}</strong> → <strong>${formatDisplayDate(newEnd)}</strong> (${workDuration} working day${workDuration!==1?'s':''})`;
+            if (entityChanged) detail += `<br>👤 Reassigned from <strong>${origEntName}</strong> → <strong>${entName}</strong>`;
+            if ((training.includedDates||[]).length > 0)
+                detail += `<br><em style="font-size:11px;color:#94a3b8;">Day overrides will be cleared for the new date range.</em>`;
+
+            dragPending = { trainingId, isTask, newStart, newEnd, proposedEntityId, entityType };
+
+            document.getElementById('drag-confirm-title').textContent =
+                conflicts.length > 0 ? '⚠ Confirm Move with Conflicts' : '✓ Confirm Reschedule';
+            document.getElementById('drag-confirm-detail').innerHTML = detail;
+            const warnEl = document.getElementById('drag-confirm-conflicts');
+            if (conflicts.length > 0) {
+                warnEl.innerHTML = '<strong>Conflicts:</strong><br>' +
+                    conflicts.slice(0,3).map(c => `• ${c.message}`).join('<br>');
+                warnEl.style.display = 'block';
+                document.getElementById('drag-confirm-ok').textContent = 'Move Anyway';
+                document.getElementById('drag-confirm-ok').className = 'btn btn-danger';
+            } else {
+                warnEl.style.display = 'none';
+                document.getElementById('drag-confirm-ok').textContent = 'Confirm Move';
+                document.getElementById('drag-confirm-ok').className = 'btn btn-primary';
+            }
+            document.getElementById('drag-confirm-overlay').classList.add('active');
+            dragState = null;
+        }
+
+        window.confirmDragMove = function() {
+            if (!dragPending) return;
+            const { trainingId, isTask, newStart, newEnd, proposedEntityId, entityType } = dragPending;
+            const col = isTask ? data.tasks : data.trainings;
+            const tr  = col.find(t => t.id === trainingId);
+            if (tr) {
+                tr.startDate = newStart; tr.endDate = newEnd;
+                tr[entityType] = proposedEntityId;
+                tr.includedDates = [];
+                saveData(); markUnsaved();
+            }
+            document.getElementById('drag-confirm-overlay').classList.remove('active');
+            dragPending = null;
+            renderGantt();
+            setTimeout(() => {
+                document.querySelectorAll(`.gantt-bar[data-training-id="${trainingId}"]`).forEach(b => {
+                    b.classList.add('lock-flash');
+                    setTimeout(() => b.classList.remove('lock-flash'), 600);
+                });
+            }, 80);
+            showToast(`✓ "${tr?.name || 'Training'}" rescheduled`);
+        };
+
+        window.cancelDragConfirm = function() {
+            document.getElementById('drag-confirm-overlay').classList.remove('active');
+            dragPending = null;
+        };
+
+    

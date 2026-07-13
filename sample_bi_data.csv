@@ -1,0 +1,41 @@
+S.No,Location,Partner,LOB,Batch #,Skill,Status,Trainig Method,Trainer /Champion Name,Original Planned Start Date,Actual Head Count,SC Rejection,Head Count excluding SC rejection,Training Start Month,Training Start Date,Training End Date,Training Atrrition,Evolve Start HC,Evolve Start Date,Evolve End Date,Evolve Atrrition,Failed in Evolve,Handover Month,Handover HC,First time pass,2nd time pass,TPUT,1st Time Pass,2nd Time Pass,Cert %
+1,Sharjah,ISON,Retention,Retention_SHA_B3,Multi,Closed,On Site,Sarah K,6/1/2026,15,0,15,26-Jun,6/8/2026,6/25/2026,0,14,6/26/2026,7/6/2026,0,2,26-Jul,13,14,1,65%,93.30%,6%,83%
+2,Ajman,EGS AJM,CNR,CNR_AJM_B2,Multi,Closed,On Site,John D,6/1/2026,25,2,25,26-Jun,6/8/2026,6/25/2026,0,24,6/26/2026,7/6/2026,0,0,26-Jul,23,15,1,70%,60.00%,12%,72%
+3,Sharjah,ISON,Sales,Sales_SHA_B5,Multi,Closed,On Site,Alaa A,6/1/2026,23,1,23,26-Jun,6/8/2026,6/25/2026,1,22,6/26/2026,7/6/2026,1,2,26-Jul,21,18,3,73%,78.30%,15%,73%
+4,Ajman,EGS AJM,CS,CS_AJM_B2,Multi,Closed,On Site,Fatima Z,6/1/2026,27,1,27,26-Jun,6/8/2026,6/25/2026,2,26,6/26/2026,7/6/2026,1,1,26-Jul,25,25,1,91%,92.60%,7%,97%
+5,Ajman,EGS AJM,Tech Support,Tech Support_AJM_B5,Multi,Closed,On Site,Alaa A,6/1/2026,20,1,20,26-Jun,6/8/2026,6/25/2026,1,19,6/26/2026,7/6/2026,1,0,26-Jul,18,14,3,69%,70.00%,12%,86%
+6,Sharjah,CMS,Retention,Retention_SHA_B2,Multi,Closed,On Site,Fatima Z,6/1/2026,28,1,28,26-Jun,6/8/2026,6/25/2026,0,27,6/26/2026,7/6/2026,0,2,26-Jul,26,22,2,88%,78.60%,10%,74%
+7,Dubai,ISON,Sales,Sales_DUB_B2,Multi,Closed,On Site,Mohamed B,6/1/2026,20,1,20,26-Jun,6/8/2026,6/25/2026,0,19,6/26/2026,7/6/2026,0,2,26-Jul,18,18,2,64%,90.00%,14%,81%
+8,Abu Dhabi,CMS,Sales,Sales_ABU_B5,Multi,Closed,On Site,Alaa A,6/1/2026,29,1,29,26-Jun,6/8/2026,6/25/2026,1,28,6/26/2026,7/6/2026,0,2,26-Jul,27,21,3,92%,72.40%,15%,79%
+9,Sharjah,CMS,Sales,Sales_SHA_B3,Multi,Closed,On Site,Alaa A,6/1/2026,18,1,18,26-Jun,6/8/2026,6/25/2026,0,17,6/26/2026,7/6/2026,1,0,26-Jul,16,16,2,75%,88.90%,14%,86%
+10,Sharjah,AJM Internal,Tech Support,Tech Support_SHA_B5,Multi,Closed,On Site,John D,6/1/2026,30,2,30,26-Jun,6/8/2026,6/25/2026,0,29,6/26/2026,7/6/2026,1,1,26-Jul,28,21,1,94%,70.00%,7%,100%
+11,Ajman,EGS AJM,CNR,CNR_AJM_B4,Multi,Closed,On Site,John D,6/1/2026,25,0,25,26-Jun,6/8/2026,6/25/2026,2,24,6/26/2026,7/6/2026,0,2,26-Jul,23,23,0,84%,92.00%,12%,81%
+12,Abu Dhabi,CMS,Tech Support,Tech Support_ABU_B4,Multi,Closed,On Site,Mohamed B,6/1/2026,17,1,17,26-Jun,6/8/2026,6/25/2026,0,16,6/26/2026,7/6/2026,1,0,26-Jul,15,13,3,73%,76.50%,11%,94%
+13,Ajman,EGS AJM,Sales,Sales_AJM_B4,Multi,Closed,On Site,Fatima Z,6/1/2026,30,1,30,26-Jun,6/8/2026,6/25/2026,0,29,6/26/2026,7/6/2026,0,1,26-Jul,28,23,0,74%,76.70%,6%,76%
+14,Ajman,EGS AJM,Tech Support,Tech Support_AJM_B5,Multi,Closed,On Site,Fatima Z,6/1/2026,26,0,26,26-Jun,6/8/2026,6/25/2026,1,25,6/26/2026,7/6/2026,0,1,26-Jul,24,23,0,73%,88.50%,13%,70%
+15,Dubai,CMS,Retention,Retention_DUB_B1,Multi,Closed,On Site,Sarah K,6/1/2026,19,1,19,26-Jun,6/8/2026,6/25/2026,0,18,6/26/2026,7/6/2026,1,0,26-Jul,17,15,3,74%,78.90%,10%,94%
+16,Sharjah,AJM Internal,CNR,CNR_SHA_B2,Multi,Closed,On Site,Fatima Z,6/1/2026,23,1,23,26-Jun,6/8/2026,6/25/2026,1,22,6/26/2026,7/6/2026,1,2,26-Jul,21,15,2,86%,65.20%,8%,100%
+17,Ajman,EGS AJM,Retention,Retention_AJM_B4,Multi,Closed,On Site,Sarah K,6/1/2026,18,1,18,26-Jun,6/8/2026,6/25/2026,1,17,6/26/2026,7/6/2026,1,2,26-Jul,16,16,3,82%,88.90%,11%,73%
+18,Dubai,CMS,CS,CS_DUB_B2,Multi,Closed,On Site,Sarah K,6/1/2026,17,2,17,26-Jun,6/8/2026,6/25/2026,1,16,6/26/2026,7/6/2026,0,0,26-Jul,15,15,3,94%,88.20%,12%,71%
+19,Ajman,AJM Internal,CS,CS_AJM_B5,Multi,Closed,On Site,Sarah K,6/1/2026,29,2,29,26-Jun,6/8/2026,6/25/2026,1,28,6/26/2026,7/6/2026,1,2,26-Jul,27,29,1,95%,100.00%,6%,77%
+20,Ajman,AJM Internal,CNR,CNR_AJM_B4,Multi,Closed,On Site,John D,6/1/2026,28,1,28,26-Jun,6/8/2026,6/25/2026,1,27,6/26/2026,7/6/2026,1,1,26-Jul,26,25,3,62%,89.30%,7%,91%
+21,Dubai,AJM Internal,Tech Support,Tech Support_DUB_B2,Multi,Closed,On Site,Fatima Z,6/1/2026,24,1,24,26-Jun,6/8/2026,6/25/2026,2,23,6/26/2026,7/6/2026,0,2,26-Jul,22,18,3,73%,75.00%,13%,88%
+22,Abu Dhabi,CMS,CS,CS_ABU_B2,Multi,Closed,On Site,Alaa A,6/1/2026,15,0,15,26-Jun,6/8/2026,6/25/2026,2,14,6/26/2026,7/6/2026,1,0,26-Jul,13,14,1,81%,93.30%,12%,90%
+23,Sharjah,ISON,CS,CS_SHA_B1,Multi,Training,On Site,Alaa A,6/1/2026,27,1,27,26-Jun,6/8/2026,6/25/2026,1,26,6/26/2026,7/6/2026,0,0,26-Jul,25,19,2,91%,70.40%,11%,100%
+24,Ajman,EGS AJM,CS,CS_AJM_B3,Multi,Training,On Site,Alaa A,6/1/2026,22,0,22,26-Jun,6/8/2026,6/25/2026,1,21,6/26/2026,7/6/2026,0,2,26-Jul,20,19,2,80%,86.40%,10%,81%
+25,Ajman,ISON,Retention,Retention_AJM_B5,Multi,Training,On Site,Sarah K,6/1/2026,21,0,21,26-Jun,6/8/2026,6/25/2026,1,20,6/26/2026,7/6/2026,0,2,26-Jul,19,15,2,61%,71.40%,5%,99%
+26,Ajman,ISON,Retention,Retention_AJM_B5,Multi,Training,On Site,Mohamed B,6/1/2026,21,2,21,26-Jun,6/8/2026,6/25/2026,2,20,6/26/2026,7/6/2026,1,1,26-Jul,19,17,2,78%,81.00%,14%,80%
+27,Ajman,EGS AJM,Retention,Retention_AJM_B1,Multi,Training,On Site,Sarah K,6/1/2026,27,0,27,26-Jun,6/8/2026,6/25/2026,0,26,6/26/2026,7/6/2026,1,2,26-Jul,25,24,1,69%,88.90%,8%,81%
+28,Dubai,CMS,Tech Support,Tech Support_DUB_B4,Multi,Training,On Site,Sarah K,6/1/2026,28,0,28,26-Jun,6/8/2026,6/25/2026,2,27,6/26/2026,7/6/2026,0,1,26-Jul,26,20,1,70%,71.40%,6%,82%
+29,Sharjah,AJM Internal,CNR,CNR_SHA_B3,Multi,Training,On Site,John D,6/1/2026,17,2,17,26-Jun,6/8/2026,6/25/2026,1,16,6/26/2026,7/6/2026,0,0,26-Jul,15,17,1,78%,100.00%,8%,91%
+30,Ajman,EGS AJM,CNR,CNR_AJM_B3,Multi,Training,On Site,Fatima Z,6/1/2026,19,2,19,26-Jun,6/8/2026,6/25/2026,2,18,6/26/2026,7/6/2026,0,0,26-Jul,17,13,0,66%,68.40%,6%,92%
+31,Dubai,CMS,CS,CS_DUB_B5,Multi,Training,On Site,Fatima Z,6/1/2026,28,1,28,26-Jun,6/8/2026,6/25/2026,0,27,6/26/2026,7/6/2026,1,1,26-Jul,26,16,3,94%,57.10%,15%,89%
+32,Abu Dhabi,CMS,Retention,Retention_ABU_B2,Multi,Training,On Site,John D,6/1/2026,16,1,16,26-Jun,6/8/2026,6/25/2026,2,15,6/26/2026,7/6/2026,1,1,26-Jul,14,10,3,94%,62.50%,9%,74%
+33,Ajman,EGS AJM,CNR,CNR_AJM_B1,Multi,Training,On Site,Mohamed B,6/1/2026,17,0,17,26-Jun,6/8/2026,6/25/2026,1,16,6/26/2026,7/6/2026,1,1,26-Jul,15,12,3,71%,70.60%,9%,86%
+34,Ajman,ISON,Retention,Retention_AJM_B2,Multi,Training,On Site,Fatima Z,6/1/2026,20,2,20,26-Jun,6/8/2026,6/25/2026,1,19,6/26/2026,7/6/2026,1,2,26-Jul,18,12,0,92%,60.00%,14%,80%
+35,Dubai,ISON,CS,CS_DUB_B3,Multi,Training,On Site,Alaa A,6/1/2026,15,0,15,26-Jun,6/8/2026,6/25/2026,1,14,6/26/2026,7/6/2026,0,1,26-Jul,13,13,0,60%,86.70%,11%,77%
+36,Ajman,AJM Internal,Tech Support,Tech Support_AJM_B2,Multi,Training,On Site,John D,6/1/2026,21,0,21,26-Jun,6/8/2026,6/25/2026,2,20,6/26/2026,7/6/2026,1,2,26-Jul,19,14,2,94%,66.70%,12%,89%
+37,Ajman,EGS AJM,CNR,CNR_AJM_B5,Multi,Training,On Site,John D,6/1/2026,16,0,16,26-Jun,6/8/2026,6/25/2026,2,15,6/26/2026,7/6/2026,1,1,26-Jul,14,13,1,72%,81.20%,13%,86%
+38,Abu Dhabi,AJM Internal,Retention,Retention_ABU_B4,Multi,Training,On Site,Sarah K,6/1/2026,27,2,27,26-Jun,6/8/2026,6/25/2026,0,26,6/26/2026,7/6/2026,1,0,26-Jul,25,22,2,63%,81.50%,11%,75%
+39,Ajman,EGS AJM,CS,CS_AJM_B1,Multi,Training,On Site,Alaa A,6/1/2026,22,2,22,26-Jun,6/8/2026,6/25/2026,1,21,6/26/2026,7/6/2026,1,1,26-Jul,20,16,2,92%,72.70%,7%,88%
+40,Dubai,AJM Internal,Sales,Sales_DUB_B4,Multi,Training,On Site,Alaa A,6/1/2026,21,2,21,26-Jun,6/8/2026,6/25/2026,1,20,6/26/2026,7/6/2026,0,1,26-Jul,19,20,2,90%,95.20%,7%,89%

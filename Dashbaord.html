@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Business Intelligence Dashboard - Standalone</title>
+    
+    <!-- External Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --danger: #dc2626;
+            --danger-light: #fee2e2;
+            --success: #16a34a;
+            --success-light: #dcfce7;
+            --warning: #ca8a04;
+            --warning-light: #fef9c3;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+            --text-light: #64748b;
+            --border: #e2e8f0;
+            --shadow: 0 1px 3px rgba(0,0,0,0.1);
+            --shadow-lg: 0 10px 25px rgba(0,0,0,0.1);
+            --radius: 8px;
+        }
+
+        [data-theme="dark"] {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --text: #f8fafc;
+            --text-light: #94a3b8;
+            --border: #334155;
+            --shadow: 0 1px 3px rgba(0,0,0,0.3);
+            --shadow-lg: 0 10px 25px rgba(0,0,0,0.3);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transition: background 0.25s ease, color 0.25s ease;
+        }
+
+        /* Header Layout */
+        .header {
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 70px;
+            flex-shrink: 0;
+            box-shadow: var(--shadow);
+            z-index: 50;
+        }
+        
+        .header h1 {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border-radius: var(--radius);
+            border: 1px solid transparent;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            transition: all 0.2s;
+            font-family: inherit;
+            user-select: none;
+        }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-secondary { background: var(--card); color: var(--text); border-color: var(--border); }
+        .btn-secondary:hover { background: var(--bg); }
+        .btn-sm { padding: 4px 8px; font-size: 11px; }
+
+        /* Dashboard Container */
+        .dashboard-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Sticky Filters Sidebar */
+        .filters-sidebar {
+            width: 260px;
+            background: var(--card);
+            border-right: 1px solid var(--border);
+            padding: 20px;
+            flex-shrink: 0;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            box-shadow: var(--shadow);
+            z-index: 10;
+        }
+
+        .filters-sidebar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 10px;
+        }
+
+        .filters-sidebar-title {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .slicers-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .slicer-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .slicer-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-light);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .slicer-select {
+            padding: 6px 12px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            background: var(--card);
+            color: var(--text);
+            width: 100%;
+            font-size: 13px;
+        }
+        .slicer-select:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        /* Main Scrollable View */
+        .main-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+        .main-content > * {
+            flex-shrink: 0;
+        }
+
+        /* Grid Layouts */
+        .bi-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+
+        .bi-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: var(--shadow);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .bi-card:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+
+        .bi-card-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .bi-card-title::before {
+            content: '';
+            display: block;
+            width: 4px;
+            height: 16px;
+            background: var(--primary);
+            border-radius: 2px;
+        }
+
+        .bi-kpi {
+            font-size: 26px;
+            font-weight: 800;
+            color: var(--text);
+            margin-top: 4px;
+        }
+
+        /* Shimmer Fill Animations */
+        .bi-bar-container { display: flex; flex-direction: column; margin-bottom: 12px; }
+        .bi-bar-label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; color: var(--text); font-weight: 500; }
+        .bi-bar-track { width: 100%; height: 10px; background: #e2e8f0; border-radius: 5px; overflow: hidden; }
+        .bi-bar-fill { height: 100%; background: linear-gradient(90deg, var(--primary), #38bdf8); border-radius: 5px; transition: width 1s ease; position: relative; overflow: hidden; }
+        .bi-bar-fill::after { content: ''; position: absolute; top: 0; left: 0; bottom: 0; right: 0; background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.3) 50%, rgba(255,255,255,0) 100%); animation: shimmer 2s infinite; }
+        @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+
+        /* Pivot Table */
+        .bi-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            margin-top: 10px;
+        }
+        .bi-table th, .bi-table td {
+            padding: 12px 14px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+            color: var(--text);
+        }
+        .bi-table th {
+            background: var(--bg);
+            font-weight: 600;
+            color: var(--text-light);
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+            border-top: 1px solid var(--border);
+        }
+        .bi-table th:first-child { border-top-left-radius: 8px; border-left: 1px solid var(--border); }
+        .bi-table th:last-child { border-top-right-radius: 8px; border-right: 1px solid var(--border); }
+        .bi-table td:first-child { border-left: 1px solid var(--border); }
+        .bi-table td:last-child { border-right: 1px solid var(--border); }
+        .bi-table tr:last-child td:first-child { border-bottom-left-radius: 8px; }
+        .bi-table tr:last-child td:last-child { border-bottom-right-radius: 8px; }
+        .bi-table tr:hover td { background-color: var(--bg); }
+
+        /* Export tabs styles */
+        .export-tabs { display: flex; gap: 2px; }
+        .export-tab-btn { padding: 8px 16px; border: none; background: none; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-light); border-bottom: 2px solid transparent; margin-bottom: -13px; display: flex; align-items: center; gap: 6px; transition: all 0.2s; }
+        .export-tab-btn:hover { color: var(--primary); border-bottom-color: var(--primary); }
+        .export-tab-btn:active { color: var(--primary-dark); border-bottom-color: var(--primary-dark); }
+        [data-theme="dark"] .export-tab-btn { color: #94a3b8; }
+        [data-theme="dark"] .export-tab-btn:hover { color: #38bdf8; border-bottom-color: #38bdf8; }
+        [data-theme="dark"] .export-tab-btn:active { color: #0284c7; border-bottom-color: #0284c7; }
+
+        /* Empty State & Upload Area */
+        .bi-upload-area {
+            border: 2px dashed var(--border);
+            border-radius: 12px;
+            padding: 64px 32px;
+            text-align: center;
+            background: var(--card);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            max-width: 600px;
+            margin: 80px auto;
+            box-shadow: var(--shadow-lg);
+        }
+        .bi-upload-area:hover {
+            border-color: var(--primary);
+            background: rgba(37,99,235,0.02);
+            transform: scale(1.005);
+        }
+
+        /* Scrollbars */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        [data-theme="dark"] ::-webkit-scrollbar-thumb { background: #475569; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        @media (max-width: 1024px) {
+            .bi-grid { grid-template-columns: 1fr; }
+            .dashboard-container { flex-direction: column; }
+            .filters-sidebar { width: 100%; position: relative; top: 0; max-height: none; border-right: none; border-bottom: 1px solid var(--border); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <div class="header">
+        <h1>
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="var(--primary)" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+            BI Dashboard Standalone
+        </h1>
+        <div class="header-actions">
+            <button class="btn btn-secondary" onclick="toggleTheme()">
+                <span id="theme-toggle-text">Dark Mode</span>
+            </button>
+            <button id="btn-download-zip" class="btn" onclick="downloadAllChartsZip()" style="display:none; background:#E00800; border-color:#E00800; color:white;">
+                ⬇ Download Charts
+            </button>
+            <button class="btn btn-primary" onclick="document.getElementById('bi-file-input').click()">
+                Upload Sheet
+            </button>
+            <input type="file" id="bi-file-input" accept=".xlsx, .xls, .csv" style="display:none;" onchange="handleBIUpload(event)">
+        </div>
+    </div>
+
+    <!-- Container -->
+    <div class="dashboard-container">
+        
+        <!-- Empty Upload State -->
+        <div id="bi-empty-state" class="bi-upload-area" onclick="document.getElementById('bi-file-input').click()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:48px;height:48px;color:var(--text-light);margin-bottom:15px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+            <h3>Upload Spreadsheet Data</h3>
+            <p style="color:var(--text-light);font-size:14px;margin-top:8px;">Upload Excel (.xlsx, .xls) or CSV files to generate Power BI-style dashboard charts, filter pane slicers, and aggregated grids.</p>
+        </div>
+
+        <!-- Dashboard Content Wrapper (Initially hidden) -->
+        <div id="bi-dashboard-wrapper" style="display:none; display:flex; width:100%; height:100%; overflow:hidden;">
+            
+            <!-- Sidebar Filters Pane -->
+            <div class="filters-sidebar">
+                <div class="filters-sidebar-header">
+                    <span class="filters-sidebar-title">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                        Filters Pane
+                    </span>
+                    <button class="btn btn-sm btn-secondary" onclick="clearBIFilters()">Clear All</button>
+                </div>
+                <div class="slicers-list" id="bi-slicers-container">
+                    <!-- Slicers rendered here -->
+                </div>
+            </div>
+
+            <!-- Scrollable Charts and Tables Panel -->
+            <div class="main-content">
+                
+                <!-- Closed Metrics Section -->
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-light); text-transform: uppercase; letter-spacing: 0.8px; display: flex; align-items: center; gap: 8px;">
+                    <span>Closed Batches Performance (Absolute Metrics)</span>
+                    <div style="flex:1; height:1px; background:var(--border);"></div>
+                </div>
+                
+                <div class="bi-grid" style="grid-template-columns: repeat(4, 1fr); gap: 16px;">
+                    <div class="bi-card" style="padding: 16px; display:flex; flex-direction:column; gap:4px;">
+                        <div style="font-size:11px;color:var(--text-light);font-weight:500;">Closed Headcount</div>
+                        <div class="bi-kpi" id="bi-kpi-hc">0</div>
+                    </div>
+                    <div class="bi-card" style="padding: 16px; display:flex; flex-direction:column; gap:4px;">
+                        <div style="font-size:11px;color:var(--text-light);font-weight:500;">Avg Certification %</div>
+                        <div class="bi-kpi" id="bi-kpi-cert">0%</div>
+                    </div>
+                    <div class="bi-card" style="padding: 16px; display:flex; flex-direction:column; gap:4px;">
+                        <div style="font-size:11px;color:var(--text-light);font-weight:500;">Avg Throughput (TPUT)</div>
+                        <div class="bi-kpi" id="bi-kpi-tput">0%</div>
+                    </div>
+                    <div class="bi-card" style="padding: 16px; display:flex; flex-direction:column; gap:4px;">
+                        <div style="font-size:11px;color:var(--text-light);font-weight:500;">Avg First Pass %</div>
+                        <div class="bi-kpi" id="bi-kpi-ftp">0%</div>
+                    </div>
+                </div>
+
+                <!-- Active Running Operations Section -->
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-light); text-transform: uppercase; letter-spacing: 0.8px; display: flex; align-items: center; gap: 8px;">
+                    <span>In-Flight Operations (Running Numbers)</span>
+                    <div style="flex:1; height:1px; background:var(--border);"></div>
+                </div>
+                
+                <div class="bi-grid" style="grid-template-columns: repeat(4, 1fr); gap: 16px;">
+                    <div class="bi-card" style="padding: 16px; display:flex; flex-direction:column; gap:4px; border-left: 3px solid #ca8a04;">
+                        <div style="font-size:11px;color:var(--text-light);font-weight:500;">Active Headcount</div>
+                        <div class="bi-kpi" id="bi-kpi-running-hc" style="color:#ca8a04;">0</div>
+                    </div>
+                    <div class="bi-card" style="padding: 16px; display:flex; flex-direction:column; gap:4px; border-left: 3px solid #ca8a04;">
+                        <div style="font-size:11px;color:var(--text-light);font-weight:500;">Active Batches</div>
+                        <div class="bi-kpi" id="bi-kpi-running-batches" style="color:#ca8a04;">0</div>
+                    </div>
+                    <div class="bi-card" style="padding: 16px; display:flex; flex-direction:column; gap:4px; border-left: 3px solid #0284c7;">
+                        <div style="font-size:11px;color:var(--text-light);font-weight:500;">Batches in Training</div>
+                        <div class="bi-kpi" id="bi-kpi-training-batches" style="color:#0284c7;">0</div>
+                    </div>
+                    <div class="bi-card" style="padding: 16px; display:flex; flex-direction:column; gap:4px; border-left: 3px solid #0284c7;">
+                        <div style="font-size:11px;color:var(--text-light);font-weight:500;">Batches in Evolve</div>
+                        <div class="bi-kpi" id="bi-kpi-evolve-batches" style="color:#0284c7;">0</div>
+                    </div>
+                </div>
+
+                <!-- Charts Row 1 -->
+                <div class="bi-grid">
+                    <div class="bi-card" id="bi-chart-cert-lob" style="display: flex; flex-direction: column; gap: 12px; min-height: 320px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <span class="bi-card-title">Avg Certification % by Site & LOB (Closed)</span>
+                            <button class="btn btn-secondary btn-sm download-btn" onclick="downloadChart('bi-chart-cert-lob', 'Cert_by_Site_LOB.png')">
+                                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                Save
+                            </button>
+                        </div>
+                        <div class="chart-content" style="flex:1; position:relative; min-height: 240px;"></div>
+                    </div>
+                    <div class="bi-card" id="bi-chart-hc-partner" style="display: flex; flex-direction: column; gap: 12px; min-height: 320px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <span class="bi-card-title">Total Headcount Share by Partner (All)</span>
+                            <button class="btn btn-secondary btn-sm download-btn" onclick="downloadChart('bi-chart-hc-partner', 'HC_by_Partner.png')">
+                                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                Save
+                            </button>
+                        </div>
+                        <div class="chart-content" style="flex:1; position:relative; min-height: 240px;"></div>
+                    </div>
+                </div>
+
+                <!-- Charts Row 2 -->
+                <div class="bi-grid">
+                    <div class="bi-card" id="bi-chart-tput-lob" style="display: flex; flex-direction: column; gap: 12px; min-height: 320px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <span class="bi-card-title">Avg Throughput (TPUT) by Site & LOB (Closed)</span>
+                            <button class="btn btn-secondary btn-sm download-btn" onclick="downloadChart('bi-chart-tput-lob', 'TPUT_by_Site_LOB.png')">
+                                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                Save
+                            </button>
+                        </div>
+                        <div class="chart-content" style="flex:1; position:relative; min-height: 240px;"></div>
+                    </div>
+                    <div class="bi-card" id="bi-chart-ftp-lob" style="display: flex; flex-direction: column; gap: 12px; min-height: 320px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <span class="bi-card-title">Avg First Pass % by Site & LOB (Closed)</span>
+                            <button class="btn btn-secondary btn-sm download-btn" onclick="downloadChart('bi-chart-ftp-lob', 'First_Pass_by_Site_LOB.png')">
+                                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                Save
+                            </button>
+                        </div>
+                        <div class="chart-content" style="flex:1; position:relative; min-height: 240px;"></div>
+                    </div>
+                </div>
+
+                <!-- Aggregated Data Pivot Table -->
+                <div class="bi-card" style="overflow-x: auto; padding: 20px;">
+                    <div class="bi-pivot-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 12px; flex-wrap: wrap; gap: 12px;">
+                        <div style="font-size: 14px; font-weight: 700; color: var(--text);">Aggregated Pivot Table (By Partner, LOB, Site)</div>
+                        <div class="export-tabs">
+                            <button class="export-tab-btn" onclick="exportBIPivotTable('csv')">
+                                <svg style="width: 14px; height: 14px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                                CSV Export
+                            </button>
+                            <button class="export-tab-btn" onclick="exportBIPivotTable('xlsx')">
+                                <svg style="width: 14px; height: 14px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                                Excel Export
+                            </button>
+                        </div>
+                    </div>
+                    <table class="bi-table" id="bi-pivot-table" style="width:100%; border-collapse:collapse;">
+                        <thead>
+                            <tr>
+                                <th>Partner</th>
+                                <th>LOB</th>
+                                <th>Location</th>
+                                <th>Closed Batches</th>
+                                <th>Closed Headcount</th>
+                                <th>Avg First Pass %</th>
+                                <th>Avg Cert %</th>
+                                <th>Avg TPUT</th>
+                                <th>Running Ops</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Script Block -->
+    <script>
+        // State
+        let biData = null;
+        let standardizedData = [];
+        let biFilters = { partner: 'All', location: 'All', lob: 'All', handoverMonth: 'All' };
+        let biChartInstances = {};
+
+        // Theme Handling
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme') || 'light';
+            const next = current === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('protrain_bi_theme', next);
+            document.getElementById('theme-toggle-text').textContent = next === 'dark' ? 'Light Mode' : 'Dark Mode';
+            if (biData && biData.length > 0) {
+                renderBIDashboard();
+            }
+        }
+        
+        // Initialise Theme
+        const savedTheme = localStorage.getItem('protrain_bi_theme') || 'light';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('theme-toggle-text').textContent = savedTheme === 'dark' ? 'Light Mode' : 'Dark Mode';
+            loadPersistedData();
+        });
+
+        // Toast notifications
+        function showToast(message, isError = false) {
+            let toast = document.getElementById('bi-toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'bi-toast';
+                toast.style.cssText = `
+                    position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+                    padding:10px 20px; border-radius:8px; font-size:13px; font-weight:500;
+                    z-index:9999; box-shadow:0 4px 12px rgba(0,0,0,0.15);
+                    transition:opacity 0.3s; pointer-events:none;
+                `;
+                document.body.appendChild(toast);
+            }
+            toast.textContent = message;
+            toast.style.background = isError ? '#fef2f2' : '#f0fdf4';
+            toast.style.color = isError ? '#b91c1c' : '#15803d';
+            toast.style.border = `1px solid ${isError ? '#fecaca' : '#bbf7d0'}`;
+            toast.style.opacity = '1';
+            clearTimeout(toast._timer);
+            toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, 3000);
+        }
+
+        // Helper: safe case-insensitive object key accessor
+        function safeKey(obj, possibleKeys) {
+            for (let k of possibleKeys) {
+                if (obj[k] !== undefined) return obj[k];
+            }
+            let lowerKeys = Object.keys(obj).map(x => x.toLowerCase());
+            for (let target of possibleKeys) {
+                let tLower = target.toLowerCase();
+                for (let actual of Object.keys(obj)) {
+                    if (actual.toLowerCase().includes(tLower) || tLower.includes(actual.toLowerCase())) return obj[actual];
+                }
+            }
+            return "";
+        }
+
+        // Helper: parse string to numeric float
+        function parseNumericStr(str) {
+            if (typeof str === 'number') return str;
+            if (!str) return 0;
+            let s = String(str).replace(/%/g, '').replace(/,/g, '').trim();
+            if (s === '#DIV/0!' || s === 'NA' || s === '-' || s === '') return 0;
+            return parseFloat(s) || 0;
+        }
+
+        // File upload handler
+        function handleBIUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'});
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+                    const json = XLSX.utils.sheet_to_json(worksheet, {defval: ""});
+                    
+                    if (json.length === 0) {
+                        showToast('Uploaded spreadsheet is empty', true);
+                        return;
+                    }
+                    
+                    biData = json;
+                    localStorage.setItem('protrain_bi_data', JSON.stringify(json));
+                    standardizedData = standardizeBIData(json);
+                    
+                    showToast(`Successfully uploaded ${json.length} rows`);
+                    initBIDashboard(standardizedData);
+                } catch (err) {
+                    console.error(err);
+                    showToast('Failed to parse spreadsheet file', true);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // Load persisted data
+        function loadPersistedData() {
+            const stored = localStorage.getItem('protrain_bi_data');
+            if (stored) {
+                try {
+                    biData = JSON.parse(stored);
+                    standardizedData = standardizeBIData(biData);
+                    initBIDashboard(standardizedData);
+                } catch(e) {
+                    console.error("Failed to restore dashboard data from LocalStorage", e);
+                }
+            }
+        }
+
+        // Standardize data mappings
+        function standardizeBIData(raw) {
+            return raw.map(row => {
+                const partnerVal = String(safeKey(row, ['Partner', 'Vendor'])).trim();
+                const locationVal = String(safeKey(row, ['Location', 'Site', 'City'])).trim();
+                const lobVal = String(safeKey(row, ['LOB', 'Line of Business'])).trim();
+                const statusVal = String(safeKey(row, ['Status', 'State'])).trim();
+                const monthVal = String(safeKey(row, ['Handover Month', 'Month'])).trim();
+
+                return {
+                    ...row,
+                    _parsedPartner: partnerVal || 'Unknown',
+                    _parsedLocation: locationVal || 'Unknown',
+                    _parsedLob: lobVal || 'Unknown',
+                    _parsedStatus: statusVal || 'In Progress',
+                    _parsedHandoverMonth: monthVal || 'Unknown'
+                };
+            });
+        }
+
+        // Initialize dashboard UI slicer list options
+        function initBIDashboard(data) {
+            document.getElementById('bi-empty-state').style.display = 'none';
+            document.getElementById('bi-dashboard-wrapper').style.display = 'flex';
+            document.getElementById('btn-download-zip').style.display = 'inline-flex';
+
+            // Reset Slicers
+            biFilters = { partner: 'All', location: 'All', lob: 'All', handoverMonth: 'All' };
+
+            renderBIDashboard();
+        }
+
+        // Render dashboard pane and graphs
+        function renderBIDashboard() {
+            if (!standardizedData || standardizedData.length === 0) return;
+
+            // 1. Gather all unique properties for filters
+            const partners = new Set();
+            const locations = new Set();
+            const lobs = new Set();
+            const months = new Set();
+
+            standardizedData.forEach(row => {
+                partners.add(row._parsedPartner);
+                locations.add(row._parsedLocation);
+                lobs.add(row._parsedLob);
+                months.add(row._parsedHandoverMonth);
+            });
+
+            // 2. Render Slicers UI
+            const slicersContainer = document.getElementById('bi-slicers-container');
+            
+            const partnersSorted = [...partners].sort();
+            const locationsSorted = [...locations].sort();
+            const lobsSorted = [...lobs].sort();
+            const monthsSorted = [...months].sort();
+
+            let slicerHtml = `
+                <div class="slicer-group">
+                    <label class="slicer-label">Handover Month</label>
+                    <select class="slicer-select" onchange="updateBIFilter('handoverMonth', this.value)">
+                        <option value="All" ${biFilters.handoverMonth === 'All' ? 'selected' : ''}>All</option>
+                        ${monthsSorted.map(m => `<option value="${m}" ${biFilters.handoverMonth === m ? 'selected' : ''}>${m}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="slicer-group">
+                    <label class="slicer-label">Partner</label>
+                    <select class="slicer-select" onchange="updateBIFilter('partner', this.value)">
+                        <option value="All" ${biFilters.partner === 'All' ? 'selected' : ''}>All</option>
+                        ${partnersSorted.map(p => `<option value="${p}" ${biFilters.partner === p ? 'selected' : ''}>${p}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="slicer-group">
+                    <label class="slicer-label">Location</label>
+                    <select class="slicer-select" onchange="updateBIFilter('location', this.value)">
+                        <option value="All" ${biFilters.location === 'All' ? 'selected' : ''}>All</option>
+                        ${locationsSorted.map(l => `<option value="${l}" ${biFilters.location === l ? 'selected' : ''}>${l}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="slicer-group">
+                    <label class="slicer-label">LOB</label>
+                    <select class="slicer-select" onchange="updateBIFilter('lob', this.value)">
+                        <option value="All" ${biFilters.lob === 'All' ? 'selected' : ''}>All</option>
+                        ${lobsSorted.map(l => `<option value="${l}" ${biFilters.lob === l ? 'selected' : ''}>${l}</option>`).join('')}
+                    </select>
+                </div>
+            `;
+            slicersContainer.innerHTML = slicerHtml;
+
+            // 3. Filter Data
+            const filteredData = standardizedData.filter(row => {
+                if (biFilters.partner !== 'All' && row._parsedPartner !== biFilters.partner) return false;
+                if (biFilters.location !== 'All' && row._parsedLocation !== biFilters.location) return false;
+                if (biFilters.lob !== 'All' && row._parsedLob !== biFilters.lob) return false;
+                if (biFilters.handoverMonth !== 'All' && row._parsedHandoverMonth !== biFilters.handoverMonth) return false;
+                return true;
+            });
+
+            // 4. Calculate metrics (Split by Status 'Closed' vs 'Active')
+            let closedHC = 0;
+            let sumCert = 0, countCert = 0;
+            let sumTput = 0, countTput = 0;
+            let sumFtp = 0, countFtp = 0;
+            let closedBatches = 0;
+
+            let runningHC = 0;
+            let runningBatches = 0;
+            let trainingBatches = 0;
+            let evolveBatches = 0;
+
+            const hcByPartner = new Map();
+            const certBySiteLob = new Map();
+            const tputBySiteLob = new Map();
+            const ftpBySiteLob = new Map();
+            
+            const pivotGroups = new Map();
+
+            filteredData.forEach(row => {
+                const partner = row._parsedPartner;
+                const location = row._parsedLocation;
+                const lob = row._parsedLob;
+                const status = row._parsedStatus;
+                const isClosed = status.toLowerCase() === 'closed';
+                const batch = String(safeKey(row, ['Batch #', 'Batch', 'batch_no'])).trim() || 'Unknown';
+                
+                const hcStr = safeKey(row, ['Actual Head Count', 'Actual Headcount', 'Head Count', 'Evolve Start HC']);
+                const certStr = safeKey(row, ['Cert %', 'Certification %', 'Cert']);
+                const tputStr = safeKey(row, ['TPUT', 'Tput', 'Throughput']);
+                const ftpStr = safeKey(row, ['1st Time Pass', 'First time pass', 'First Pass']);
+
+                const hc = parseNumericStr(hcStr);
+                let cert = parseNumericStr(certStr);
+                let tput = parseNumericStr(tputStr);
+                
+                // Parse First Pass % robustly
+                let ftp = 0;
+                const ftpPctVal = safeKey(row, ['1st Time Pass']);
+                if (ftpPctVal !== undefined && ftpPctVal !== "") {
+                    ftp = parseNumericStr(ftpPctVal);
+                    if (ftp > 0 && ftp <= 1 && String(ftpPctVal).indexOf('%') === -1) ftp *= 100;
+                } else {
+                    const ftpHcVal = safeKey(row, ['First time pass', 'First Pass']);
+                    if (ftpHcVal !== undefined && ftpHcVal !== "") {
+                        const ftpHc = parseNumericStr(ftpHcVal);
+                        if (String(ftpHcVal).indexOf('%') !== -1 || (ftpHc > 0 && ftpHc <= 1 && hc > 1)) {
+                            ftp = ftpHc;
+                            if (ftp > 0 && ftp <= 1 && String(ftpHcVal).indexOf('%') === -1) ftp *= 100;
+                        } else {
+                            ftp = hc > 0 ? (ftpHc / hc) * 100 : 0;
+                        }
+                    }
+                }
+
+                if (cert > 0 && cert <= 1 && String(certStr).indexOf('%') === -1) cert *= 100;
+                if (tput > 0 && tput <= 1 && String(tputStr).indexOf('%') === -1) tput *= 100;
+
+                // Partner HC aggregates both closed and active
+                hcByPartner.set(partner, (hcByPartner.get(partner) || 0) + hc);
+
+                if (isClosed) {
+                    closedHC += hc;
+                    closedBatches++;
+                    if (cert > 0) { sumCert += cert; countCert++; }
+                    if (tput > 0) { sumTput += tput; countTput++; }
+                    if (ftp > 0) { sumFtp += ftp; countFtp++; }
+
+                    const siteLobKey = `${location} - ${lob}`;
+                    if (!certBySiteLob.has(siteLobKey)) certBySiteLob.set(siteLobKey, {sum: 0, count: 0});
+                    if (cert > 0) {
+                        let obj = certBySiteLob.get(siteLobKey);
+                        obj.sum += cert; obj.count++;
+                    }
+
+                    if (!tputBySiteLob.has(siteLobKey)) tputBySiteLob.set(siteLobKey, {sum: 0, count: 0});
+                    if (tput > 0) {
+                        let obj = tputBySiteLob.get(siteLobKey);
+                        obj.sum += tput; obj.count++;
+                    }
+
+                    if (!ftpBySiteLob.has(siteLobKey)) ftpBySiteLob.set(siteLobKey, {sum: 0, count: 0});
+                    if (ftp > 0) {
+                        let fObj = ftpBySiteLob.get(siteLobKey);
+                        fObj.sum += ftp;
+                        fObj.count++;
+                    }
+                } else {
+                    runningHC += hc;
+                    runningBatches++;
+                    if (status.toLowerCase() === 'training') trainingBatches++;
+                    else if (status.toLowerCase() === 'evolve') evolveBatches++;
+                }
+
+                // Pivot calculation grouping
+                const pKey = `${partner}|${lob}|${location}`;
+                if (!pivotGroups.has(pKey)) {
+                    pivotGroups.set(pKey, { hc:0, ftpSum:0, ftpCount:0, certSum:0, certCount:0, tputSum:0, tputCount:0, batches: new Set(), runningHc: 0, runningBatches: 0 });
+                }
+                const pGrp = pivotGroups.get(pKey);
+                if (isClosed) {
+                    pGrp.hc += hc;
+                    if(ftp > 0) { pGrp.ftpSum += ftp; pGrp.ftpCount++; }
+                    if(cert>0) { pGrp.certSum += cert; pGrp.certCount++; }
+                    if(tput>0) { pGrp.tputSum += tput; pGrp.tputCount++; }
+                    if(batch !== 'Unknown') pGrp.batches.add(batch);
+                } else {
+                    pGrp.runningHc += hc;
+                    pGrp.runningBatches++;
+                }
+            });
+
+            // Update Closed KPIs
+            document.getElementById('bi-kpi-hc').textContent = closedHC;
+            document.getElementById('bi-kpi-ftp').textContent = countFtp > 0 ? (sumFtp / countFtp).toFixed(1) + '%' : '0%';
+            document.getElementById('bi-kpi-cert').textContent = countCert > 0 ? (sumCert / countCert).toFixed(1) + '%' : '0%';
+            document.getElementById('bi-kpi-tput').textContent = countTput > 0 ? (sumTput / countTput).toFixed(1) + '%' : '0%';
+
+            // Update Running KPIs
+            document.getElementById('bi-kpi-running-hc').textContent = runningHC;
+            document.getElementById('bi-kpi-running-batches').textContent = runningBatches;
+            document.getElementById('bi-kpi-training-batches').textContent = trainingBatches;
+            document.getElementById('bi-kpi-evolve-batches').textContent = evolveBatches;
+
+            // Gather Maps for Charts
+            const finalCertMap = new Map();
+            for (const [k, v] of certBySiteLob) { finalCertMap.set(k, v.count > 0 ? (v.sum / v.count) : 0); }
+            
+            const finalTputMap = new Map();
+            for (const [k, v] of tputBySiteLob) { finalTputMap.set(k, v.count > 0 ? (v.sum / v.count) : 0); }
+
+            const finalFtpMap = new Map();
+            for (const [k, v] of ftpBySiteLob) { finalFtpMap.set(k, v.count > 0 ? (v.sum / v.count) : 0); }
+
+            // Redraw Chart Canvases
+            destroyBICharts();
+            document.querySelector('#bi-chart-cert-lob .chart-content').innerHTML = '<canvas id="canvas-cert-lob"></canvas>';
+            document.querySelector('#bi-chart-tput-lob .chart-content').innerHTML = '<canvas id="canvas-tput-lob"></canvas>';
+            document.querySelector('#bi-chart-ftp-lob .chart-content').innerHTML = '<canvas id="canvas-ftp-lob"></canvas>';
+            document.querySelector('#bi-chart-hc-partner .chart-content').innerHTML = '<canvas id="canvas-hc-partner"></canvas>';
+
+            const theme = getChartThemeColors();
+
+            // Chart 1: Cert %
+            const certLabels = [...finalCertMap.keys()];
+            const certValues = [...finalCertMap.values()];
+            renderChartJS('canvas-cert-lob', 'bar', {
+                labels: certLabels,
+                datasets: [{
+                    label: 'Avg Certification %',
+                    data: certValues,
+                    backgroundColor: theme.primaryColor,
+                    borderColor: theme.primaryColor,
+                    borderWidth: 1,
+                    borderRadius: 4
+                }]
+            }, {
+                scales: {
+                    x: { grid: { color: theme.gridColor }, ticks: { color: theme.textColor, font: { size: 10 } } },
+                    y: { grid: { color: theme.gridColor }, ticks: { color: theme.textColor, callback: v => v + '%' }, min: 0, max: 100 }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: ctx => `Avg Cert: ${ctx.raw.toFixed(1)}%` } }
+                },
+                onClick: (e, activeEls) => {
+                    if (activeEls.length > 0) {
+                        const idx = activeEls[0].index;
+                        const label = certLabels[idx];
+                        const loc = label.split(' - ')[0].trim();
+                        updateBIFilter('location', loc);
+                    }
+                }
+            });
+
+            // Chart 2: Partner Headcount (Doughnut)
+            const partnerLabels = [...hcByPartner.keys()];
+            const partnerValues = [...hcByPartner.values()];
+            renderChartJS('canvas-hc-partner', 'doughnut', {
+                labels: partnerLabels,
+                datasets: [{
+                    data: partnerValues,
+                    backgroundColor: theme.colors,
+                    borderWidth: 0
+                }]
+            }, {
+                plugins: {
+                    legend: { position: 'right', labels: { color: theme.textColor, font: { size: 11 } } }
+                },
+                onClick: (e, activeEls) => {
+                    if (activeEls.length > 0) {
+                        const idx = activeEls[0].index;
+                        const label = partnerLabels[idx];
+                        updateBIFilter('partner', label);
+                    }
+                }
+            });
+
+            // Chart 3: TPUT (Horizontal Bar)
+            const tputLabels = [...finalTputMap.keys()];
+            const tputValues = [...finalTputMap.values()];
+            renderChartJS('canvas-tput-lob', 'bar', {
+                labels: tputLabels,
+                datasets: [{
+                    label: 'Avg Throughput %',
+                    data: tputValues,
+                    backgroundColor: '#ea580c',
+                    borderColor: '#ea580c',
+                    borderWidth: 1,
+                    borderRadius: 4
+                }]
+            }, {
+                indexAxis: 'y',
+                scales: {
+                    x: { grid: { color: theme.gridColor }, ticks: { color: theme.textColor, callback: v => v + '%' }, min: 0, max: 100 },
+                    y: { grid: { color: theme.gridColor }, ticks: { color: theme.textColor, font: { size: 10 } } }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: ctx => `Avg TPUT: ${ctx.raw.toFixed(1)}%` } }
+                },
+                onClick: (e, activeEls) => {
+                    if (activeEls.length > 0) {
+                        const idx = activeEls[0].index;
+                        const label = tputLabels[idx];
+                        const loc = label.split(' - ')[0].trim();
+                        updateBIFilter('location', loc);
+                    }
+                }
+            });
+
+            // Chart 4: FTP % (Line Chart)
+            const ftpLabels = [...finalFtpMap.keys()];
+            const ftpValues = [...finalFtpMap.values()];
+            renderChartJS('canvas-ftp-lob', 'line', {
+                labels: ftpLabels,
+                datasets: [{
+                    label: 'Avg First Pass %',
+                    data: ftpValues,
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.08)',
+                    fill: true,
+                    tension: 0.3,
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    pointBackgroundColor: '#2563eb'
+                }]
+            }, {
+                scales: {
+                    x: { grid: { color: theme.gridColor }, ticks: { color: theme.textColor, font: { size: 10 } } },
+                    y: { grid: { color: theme.gridColor }, ticks: { color: theme.textColor, callback: v => v + '%' }, min: 0, max: 100 }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: ctx => `Avg First Pass: ${ctx.raw.toFixed(1)}%` } }
+                },
+                onClick: (e, activeEls) => {
+                    if (activeEls.length > 0) {
+                        const idx = activeEls[0].index;
+                        const label = ftpLabels[idx];
+                        const loc = label.split(' - ')[0].trim();
+                        updateBIFilter('location', loc);
+                    }
+                }
+            });
+
+            // Pivot Table Render with heatmapping
+            const tbody = document.querySelector('#bi-pivot-table tbody');
+            let tableHtml = '';
+            
+            const sortedPivots = [...pivotGroups.entries()].sort((a,b) => a[0].localeCompare(b[0]));
+            sortedPivots.forEach(([key, data]) => {
+                const [partner, lob, loc] = key.split('|');
+                const avgFtpVal = data.ftpCount > 0 ? (data.ftpSum / data.ftpCount) : null;
+                const avgCertVal = data.certCount > 0 ? (data.certSum / data.certCount) : null;
+                const avgTputVal = data.tputCount > 0 ? (data.tputSum / data.tputCount) : null;
+
+                const avgFtpText = avgFtpVal !== null ? avgFtpVal.toFixed(1) + '%' : '-';
+                const avgCertText = avgCertVal !== null ? avgCertVal.toFixed(1) + '%' : '-';
+                const avgTputText = avgTputVal !== null ? avgTputVal.toFixed(1) + '%' : '-';
+
+                const getStyle = (val) => {
+                    if (val === null) return 'text-align: center;';
+                    if (val >= 90) return 'background-color: rgba(22, 163, 74, 0.12); color: #15803d; font-weight: 600; text-align: center; border-radius: 4px;';
+                    if (val >= 80) return 'background-color: rgba(202, 138, 4, 0.12); color: #a16207; font-weight: 600; text-align: center; border-radius: 4px;';
+                    return 'background-color: rgba(220, 38, 38, 0.12); color: #b91c1c; font-weight: 600; text-align: center; border-radius: 4px;';
+                };
+
+                const ftpStyle = getStyle(avgFtpVal);
+                const certStyle = getStyle(avgCertVal);
+                const tputStyle = getStyle(avgTputVal);
+
+                let runningOpsText = '-';
+                if (data.runningBatches > 0) {
+                    runningOpsText = `<strong>${data.runningHc} HC</strong> (${data.runningBatches} Batch${data.runningBatches !== 1 ? 'es' : ''})`;
+                }
+
+                tableHtml += `
+                    <tr>
+                        <td><strong>${partner}</strong></td>
+                        <td>${lob}</td>
+                        <td>${loc}</td>
+                        <td style="text-align: center;">${data.batches.size}</td>
+                        <td style="text-align: center;">${data.hc}</td>
+                        <td style="${ftpStyle}">${avgFtpText}</td>
+                        <td style="${certStyle}">${avgCertText}</td>
+                        <td style="${tputStyle}">${avgTputText}</td>
+                        <td style="color: var(--text-light); font-size: 11px;">${runningOpsText}</td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = tableHtml;
+        }
+
+        // Destroy ChartJS instances to prevent canvas reuse bugs
+        function destroyBICharts() {
+            Object.keys(biChartInstances).forEach(k => {
+                if (biChartInstances[k]) {
+                    biChartInstances[k].destroy();
+                }
+            });
+            biChartInstances = {};
+        }
+
+        // Get Theme colors dynamically
+        function getChartThemeColors() {
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            return {
+                gridColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                textColor: isDark ? '#94a3b8' : '#64748b',
+                primaryColor: isDark ? '#38bdf8' : '#2563eb',
+                accentColor: '#ea580c',
+                colors: ['#2563eb', '#16a34a', '#9333ea', '#ea580c', '#0891b2', '#db2777', '#ca8a04', '#4f46e5']
+            };
+        }
+
+        // Helper render chart
+        function renderChartJS(canvasId, type, data, options) {
+            const ctx = document.getElementById(canvasId);
+            if (!ctx) return;
+
+            if (biChartInstances[canvasId]) {
+                biChartInstances[canvasId].destroy();
+            }
+
+            biChartInstances[canvasId] = new Chart(ctx, {
+                type: type,
+                data: data,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    ...options
+                }
+            });
+        }
+
+        // Slicer action handlers
+        function updateBIFilter(type, value) {
+            biFilters[type] = value;
+            renderBIDashboard();
+        }
+
+        function clearBIFilters() {
+            biFilters = { partner: 'All', location: 'All', lob: 'All', handoverMonth: 'All' };
+            renderBIDashboard();
+        }
+
+        // Table export utilities
+        function exportBIPivotTable(format) {
+            const table = document.getElementById('bi-pivot-table');
+            if (!table) return;
+            
+            const headers = [];
+            const ths = table.querySelectorAll('thead th');
+            ths.forEach(th => {
+                headers.push(th.textContent.trim());
+            });
+            
+            const rows = [];
+            const trs = table.querySelectorAll('tbody tr');
+            trs.forEach(tr => {
+                const row = [];
+                const tds = tr.querySelectorAll('td');
+                tds.forEach(td => {
+                    row.push(td.textContent.trim());
+                });
+                if (row.length > 0) {
+                    rows.push(row);
+                }
+            });
+            
+            if (rows.length === 0) {
+                alert("No data available to export.");
+                return;
+            }
+            
+            let filterDesc = '';
+            if (biFilters.partner !== 'All') filterDesc += `_${biFilters.partner.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            if (biFilters.location !== 'All') filterDesc += `_${biFilters.location.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            if (biFilters.lob !== 'All') filterDesc += `_${biFilters.lob.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            if (biFilters.handoverMonth !== 'All') filterDesc += `_${biFilters.handoverMonth.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            if (!filterDesc) filterDesc = '_All';
+            
+            const filename = `BI_Pivot_Table${filterDesc}`;
+            
+            if (format === 'csv') {
+                const csvContent = [headers.join(','), ...rows.map(r => r.map(val => `"${val.replace(/"/g, '""')}"`).join(','))].join('\n');
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                const url = URL.createObjectURL(blob);
+                link.setAttribute('href', url);
+                link.setAttribute('download', `${filename}.csv`);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            } else if (format === 'xlsx') {
+                if (typeof XLSX === 'undefined') {
+                    alert("SheetJS library is not loaded.");
+                    return;
+                }
+                const data = [headers, ...rows];
+                const worksheet = XLSX.utils.aoa_to_sheet(data);
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, "Pivot Table");
+                XLSX.writeFile(workbook, `${filename}.xlsx`);
+            }
+        }
+
+        // Chart download zip utility
+        function downloadAllChartsZip() {
+            if (typeof JSZip === 'undefined') {
+                alert("JSZip library not loaded yet.");
+                return;
+            }
+            
+            const charts = [
+                { id: 'bi-chart-cert-lob', name: 'Cert_by_Site_LOB.png' },
+                { id: 'bi-chart-hc-partner', name: 'HC_by_Partner.png' },
+                { id: 'bi-chart-tput-lob', name: 'TPUT_by_Site_LOB.png' },
+                { id: 'bi-chart-ftp-lob', name: 'First_Pass_by_Site_LOB.png' }
+            ];
+
+            const zip = new JSZip();
+            const promises = [];
+
+            const btn = document.getElementById('btn-download-zip');
+            if (btn) btn.innerHTML = '⏳ Generating...';
+
+            charts.forEach(chart => {
+                const el = document.getElementById(chart.id);
+                if (el) {
+                    const downloadBtn = el.querySelector('.download-btn');
+                    if (downloadBtn) downloadBtn.style.display = 'none';
+
+                    const promise = html2canvas(el, { backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--card').trim(), scale: 2 }).then(canvas => {
+                        if (downloadBtn) downloadBtn.style.display = 'flex';
+                        return new Promise((resolve) => {
+                            canvas.toBlob(blob => {
+                                zip.file(chart.name, blob);
+                                resolve();
+                            }, 'image/png');
+                        });
+                    }).catch(err => {
+                        if (downloadBtn) downloadBtn.style.display = 'flex';
+                        console.error(err);
+                    });
+                    promises.push(promise);
+                }
+            });
+
+            Promise.all(promises).then(() => {
+                zip.generateAsync({type:"blob"}).then(function(content) {
+                    const link = document.createElement('a');
+                    link.download = 'BI_Dashboard_Charts.zip';
+                    link.href = URL.createObjectURL(content);
+                    link.click();
+                    if (btn) btn.innerHTML = '⬇ Download Charts';
+                });
+            });
+        }
+
+        // Single chart image capture
+        function downloadChart(elementId, filename) {
+            const card = document.getElementById(elementId);
+            if (!card) return;
+            
+            const btn = card.querySelector('.download-btn');
+            if (btn) btn.style.display = 'none';
+
+            html2canvas(card, {
+                backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--card').trim(),
+                scale: 2
+            }).then(canvas => {
+                if (btn) btn.style.display = 'flex';
+                canvas.toBlob(blob => {
+                    const link = document.createElement('a');
+                    link.download = filename;
+                    link.href = URL.createObjectURL(blob);
+                    link.click();
+                }, 'image/png');
+            }).catch(err => {
+                if (btn) btn.style.display = 'flex';
+                console.error("Error generating chart image:", err);
+            });
+        }
+    </script>
+</body>
+</html>
