@@ -3736,7 +3736,7 @@
                             const rows = buildRoomUtilisationRows();
                             return `
                                 <div style="font-size:12px;color:var(--text-light);margin-bottom:12px;">
-                                    Schedule period: <strong>\${periodLabel}</strong> · <strong>\${totalWorkingDays}</strong> total working days
+                                    Schedule period: <strong>${periodLabel}</strong> · <strong>${totalWorkingDays}</strong> total working days
                                 </div>
                                 <table class="data-table">
                                     <thead>
@@ -3751,27 +3751,27 @@
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        \${rows.map(r => {
+                                        ${rows.map(r => {
                                             const pct = r.utilisationPct;
                                             const fillPct = r.avgFillRatePct;
                                             const barColor = pct >= 90 ? '#dc2626' : pct >= 70 ? '#ea580c' : pct >= 40 ? '#16a34a' : '#0891b2';
                                             const badge = pct >= 90 ? 'badge-red' : pct >= 70 ? 'badge-orange' : pct >= 40 ? 'badge-green' : 'badge-blue';
                                             const fillBadge = fillPct > 100 ? 'badge-red' : fillPct >= 80 ? 'badge-orange' : fillPct >= 40 ? 'badge-green' : 'badge-blue';
-                                            return \\\`<tr>
-                                                <td><strong>\\\${r.name}</strong></td>
-                                                <td style="text-align:center;">\\\${r.capacity}</td>
-                                                <td style="text-align:center;">\\\${r.sessions}</td>
-                                                <td style="text-align:center;">\\\${r.occupiedDays}</td>
-                                                <td style="text-align:center;"><span class="badge \\\${badge}">\\\${pct.toFixed(1)}%</span></td>
+                                            return `<tr>
+                                                <td><strong>${r.name}</strong></td>
+                                                <td style="text-align:center;">${r.capacity}</td>
+                                                <td style="text-align:center;">${r.sessions}</td>
+                                                <td style="text-align:center;">${r.occupiedDays}</td>
+                                                <td style="text-align:center;"><span class="badge ${badge}">${pct.toFixed(1)}%</span></td>
                                                 <td style="text-align:center;">
-                                                    \\\${r.capacity !== '—' ? '<span class="badge ' + fillBadge + '">' + fillPct.toFixed(1) + '%</span>' : '<span style="color:var(--text-light)">—</span>'}
+                                                    ${r.capacity !== '—' ? '<span class="badge ' + fillBadge + '">' + fillPct.toFixed(1) + '%</span>' : '<span style="color:var(--text-light)">—</span>'}
                                                 </td>
                                                 <td>
                                                     <div style="background:#e2e8f0;border-radius:4px;height:8px;overflow:hidden;">
-                                                        <div style="background:\\\${barColor};width:\\\${Math.min(pct,100)}%;height:100%;border-radius:4px;transition:width 0.3s;"></div>
+                                                        <div style="background:${barColor};width:${Math.min(pct,100)}%;height:100%;border-radius:4px;transition:width 0.3s;"></div>
                                                     </div>
                                                 </td>
-                                            </tr>\\\`;
+                                            </tr>`;
                                         }).join('')}
                                     </tbody>
                                 </table>
