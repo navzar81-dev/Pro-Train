@@ -4,7 +4,20 @@ This document tracks the major iterations, features, and enhancements implemente
 
 ---
 
-## Version 39 (Current Latest)
+## Version 40 (Current Latest)
+**File:** `training_planner_40.html`
+**Focus:** Bifurcated Conflict & Batch Status, Table Header Alignment, and UI Cleanup
+
+- **Bifurcated Conflict & Date-Based Status:** Status and status label values for trainings and tasks are now calculated purely based on their start and end dates (e.g., `Upcoming`, `In Progress`, `Completed`), never overwritten by `Conflict`.
+- **Dedicated Conflict Column:** Added a new sortable `Conflict` column in the Trainings tab table. Rows with conflicts display a red warning badge (`⚠ Conflict`) which triggers the interactive hover/click conflict details popover. Rows without conflicts display a subtle gray `No Conflict` badge.
+- **Double Conflict Popover Triggers:** The detailed conflict popover can now be triggered from both the little red circular `!` badge next to the batch name and the `⚠ Conflict` badge in the Conflict column, per user requirements.
+- **Table Column Misalignment Fixed:** Added a missing static `Participants` header to align columns correctly (preventing layout shifting between headers and row actions).
+- **Enriched Status Filtering:** Status filter chips now cleanly distinguish between Date-based status and Conflict status. Filtering by `Conflict` correctly isolates all rows with active conflicts, while other chips filter purely by date-status.
+- **Aligned CSV Reports:** Updated the CSV exports (`exportPlannedTrainingReport` and `exportFilteredTrainingsToCSV`) to reflect the new decoupled status and conflict metrics, including adding a dedicated `Conflict` column to the filtered CSV output.
+
+---
+
+## Version 39
 **File:** `training_planner_39.html`
 **Focus:** Gantt Conflict Overlap Visual Highlighting (Copied from V37)
 
