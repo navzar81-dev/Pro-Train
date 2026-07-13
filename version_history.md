@@ -4,7 +4,17 @@ This document tracks the major iterations, features, and enhancements implemente
 
 ---
 
-## Version 43 (Current Latest)
+## Version 44 (Current Latest)
+**File:** `training_planner_44.html`
+**Focus:** Visual Charts and Advanced Room Occupancy Reporting on Dashboard
+
+- **Interactive Dashboard Charts:** Integrated a two-column Chart.js visualization block directly below the top stats grid. Displays the **Sub-Section Session Share** (Doughnut chart) and the **Monthly Training Load** in total hours (Bar chart).
+- **Advanced Room Reporting:** Added a **Room Utilisation & Fill-Rate Summary** card onto the Dashboard. Computes room occupancy percentages and seat fill-rates (actual participants vs. seating capacity), supported by styled progress bars.
+- **Robust Multi-Tab State Management:** Ensured canvas resources and instances are cleanly destroyed and re-instantiated upon tab switches to avoid rendering warnings.
+
+---
+
+## Version 43
 **File:** `training_planner_43.html`
 **Focus:** Relocation of Key Summaries to Dashboard
 
