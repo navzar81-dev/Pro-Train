@@ -40,6 +40,12 @@ ProTrain eliminates the complexity and latency of traditional heavy enterprise t
 - 🏢 **Room-Only Ad-Hoc Booking:** Book physical conference or training rooms without requiring trainer assignments, while preserving room availability rules.
 - 👥 **End-to-End Participant & Attrition Management:** Global master roster with 15-field participant data schemas, inline status updates (`In Training - Active`, `Certified`, `Inactive`), certification date capture, and attrition tracking.
 - 📊 **Executive BI & Analytics:** Integrated Chart.js visualizations, live capacity utilisation stats, seat fill-rate monitors, and multi-format CSV exports.
+<img width="1123" height="620" alt="image" src="https://github.com/user-attachments/assets/d252e11d-a628-45b8-986f-907714f90552" />
+<img width="1125" height="622" alt="image" src="https://github.com/user-attachments/assets/b846828d-e1b8-48c9-a211-fafb277c5f3b" />
+<img width="1119" height="354" alt="image" src="https://github.com/user-attachments/assets/1f61b83f-312a-4ea4-bd7f-be26b2aaacb3" />
+<img width="1122" height="422" alt="image" src="https://github.com/user-attachments/assets/4daedbe6-dad4-4f6c-a9bb-9f611196d9bc" />
+<img width="568" height="384" alt="image" src="https://github.com/user-attachments/assets/78af3eba-99b4-436d-81ed-e30c5d1bbd91" />
+<img width="1122" height="530" alt="image" src="https://github.com/user-attachments/assets/bcce479d-5b68-49bd-9c77-999af879c854" />
 
 ---
 
