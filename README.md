@@ -59,7 +59,7 @@ Because ProTrain is built as an offline-first single-page application, getting s
    git clone https://github.com/navzar81-dev/Pro-Train.git
    cd Pro-Train
    ```
-2. Double-click the latest version file (e.g. `training_planner_46.html`) or open it in any modern browser (**Google Chrome**, **Microsoft Edge**, **Mozilla Firefox**, or **Safari**).
+2. Double-click the latest version file (e.g. `training_planner_47.html`) or open it in any modern browser (**Google Chrome**, **Microsoft Edge**, **Mozilla Firefox**, or **Safari**).
 3. The application will load immediately with all features accessible offline.
 
 ### Option 2: Static Web Server Hosting
@@ -72,7 +72,7 @@ python -m http.server 8080
 # Example using Node.js http-server / serve
 npx serve .
 ```
-Navigate to `http://localhost:8080/training_planner_46.html` in your browser.
+Navigate to `http://localhost:8080/training_planner_47.html` in your browser.
 
 ---
 
@@ -89,8 +89,8 @@ ProTrain utilizes a high-performance, modular client-side architecture contained
 ├───────────────┴─────────────────────────────┴───────────────┤
 │                      Core Engine Layer                      │
 ├─────────────────┬───────────────────────────┬───────────────┤
-│ SMART Conflict  │ Auto-Suggest Matching &   │ Natural Lang  │
-│ Engine          │ Working Days Calculator   │ Assistant     │
+│ SMART Conflict  │ Auto-Suggest Matching &   │ Web Speech &  │
+│ Engine          │ Working Days Calculator   │ Voice Engine  │
 ├─────────────────┴───────────────────────────┴───────────────┤
 │                  Data Persistence & Security                │
 ├─────────────────┬───────────────────────────┬───────────────┤
@@ -101,6 +101,7 @@ ProTrain utilizes a high-performance, modular client-side architecture contained
 
 ### Key Technical Specs:
 - **Core Technologies:** HTML5, CSS3 (Vanilla design tokens, CSS Grid, Flexbox, responsive layouts), Vanilla JavaScript (ES6+).
+- **Two-Way Voice Assistant:** Browser-native `SpeechRecognition` and `SpeechSynthesis` APIs for hands-free queries and spoken voice responses.
 - **Visuals & Charts:** Embedded Chart.js for responsive doughnut charts, monthly workload bar charts, and operational KPIs.
 - **Data Persistence:** LocalStorage database serialization with automatic recovery snapshots, JSON backup/restore, and File System Access API integration.
 - **Security & Integrity:** SHA-256 PIN authentication with pure-JS fallback for offline Edge `file://` contexts.
@@ -109,7 +110,18 @@ ProTrain utilizes a high-performance, modular client-side architecture contained
 
 ## Key Modules & Capabilities
 
-### 1. Executive Dashboard
+### 1. Two-Way Intelligent Voice Assistant (NEW in V47)
+- **Speech-to-Text (STT):** Click the 🎙️ mic button or chat header to speak commands with real-time audio waveform visualization.
+- **Text-to-Speech (TTS):** The assistant reads out answers verbally with natural inflection.
+- **Audio Mute/Unmute:** 🔊 / 🔇 audio toggle button in the header (persisted across sessions).
+- **Voice Action Dispatcher:**
+  - *Voice Navigation:* `"Go to Gantt view"`, `"Show participants"`, `"Open Dashboard"`.
+  - *Conflict Auditing:* `"Check conflicts"` / `"Show conflicts"`.
+  - *Batch State Management:* `"Put Batch 2 on hold"` / `"Resume Batch 2"`.
+  - *Roster Export:* `"Export participant roster"` / `"Download CSV"`.
+  - *Availability Checks:* `"Is Sarah free tomorrow?"`, `"Free rooms next Monday"`.
+
+### 2. Executive Dashboard
 - **Top KPI Cards:** Total Scheduled Trainings, Enrolled Participants, Active Trainers, and Available Training Rooms.
 - **Interactive Visual Analytics:** 
   - Sub-Section Session Share (Doughnut Chart).
@@ -117,20 +129,20 @@ ProTrain utilizes a high-performance, modular client-side architecture contained
 - **Room Utilisation & Seat Fill-Rate Monitor:** Real-time calculation of room occupancy percentages and seat utilization against physical room capacity.
 - **Live Summaries:** Upcoming training cohorts, resource tasks, and trainer matrix preview cards.
 
-### 2. Trainings & Task Management
+### 3. Trainings & Task Management
 - **SMART Scheduling Modal:** Choose between formal training batches or operational resource tasks.
 - **Working Days Calculation:** Automatically accounts for weekends and configured company holidays to compute accurate end dates.
 - **Ad-Hoc Room-Only Support:** Option to reserve rooms for non-training events without trainer assignment.
 - **"On Hold" State Management:** Dedicated toggle to pause trainings/tasks, styling them with striped timeline patterns while keeping resources safely reserved.
 - **Decoupled Conflict System:** Date-based status (`Upcoming`, `In Progress`, `Completed`) is cleanly bifurcated from conflict alerts (`[Conflict]` badge with hover popover inspection).
 
-### 3. Interactive Gantt Timeline
+### 4. Interactive Gantt Timeline
 - **Multi-View Modes:** Switch between **Activities View** and **Trainers / Rooms Resource Allocation Views**.
 - **Zoom Levels:** Slices timeline across **Day**, **Week**, and **Month** views with dynamic column scaling.
 - **Diagonal Conflict Stripes:** Conflicting days display a high-contrast diagonal striped red overlay (`.gantt-conflict-overlay`), with activity labels clearly readable on top.
 - **Search & Filter:** Real-time Gantt search bar to filter trainers, rooms, and batches with instant clearing.
 
-### 4. Participant & Attrition Management
+### 5. Participant & Attrition Management
 - **15-Field Master Roster:** Tracks Name, ACD, User ID, Batch No, Department/LOB, Site/Cost Center, Contact No, Email, DOJ, etc.
 - **Dynamic Import / Raw Data Paste:** Upload 15-column standard CSV roster templates or copy-paste tab-separated raw data directly from Excel.
 - **Communication Hub:** Instant one-click triggers for Outlook Email, MS Teams Chat, WhatsApp, and ICS calendar invite generation.
@@ -145,7 +157,7 @@ ProTrain includes role-based access control directly inside the application:
 | :--- | :---: | :---: |
 | Browse Trainings, Trainers & Rooms | ✅ Allowed | ✅ Allowed |
 | View Gantt Timelines & Reports | ✅ Allowed | ✅ Allowed |
-| Global Search & NLP Assistant | ✅ Allowed | ✅ Allowed |
+| Global Search & Voice Assistant | ✅ Allowed | ✅ Allowed |
 | Export CSV Reports & Backups | ✅ Allowed | ✅ Allowed |
 | Add / Edit / Delete Trainings & Tasks | ❌ Blocked | ✅ Full Access |
 | Participant Status & Attrition Updates | ❌ Blocked | ✅ Full Access |
@@ -194,7 +206,12 @@ ProTrain features a refined, multi-state participant tracking system:
 
 ProTrain maintains strict, traceable version progression across standalone files:
 
-### **Version 46 (Current Latest)** — `training_planner_46.html`
+### **Version 47 (Current Latest)** — `training_planner_47.html`
+- **Intelligent Two-Way Voice Assistant:** Integrated Speech-to-Text (STT) and Text-to-Speech (TTS) using native Web APIs.
+- **Voice Action Dispatcher:** Execute voice commands for navigation, schedule conflict audits, batch hold/resume, and CSV exports.
+- **Audio Feedback & Mute Toggle:** Spoken voice responses with instant 🔊/🔇 mute toggle and soundwave listening animation.
+
+### **Version 46** — `training_planner_46.html`
 - **Multi-State Status Workflow:** Expanded participant status to `In Training - Active`, `Certified`, and `Inactive`.
 - **Certification Date Modal:** Modal prompt to capture certification date on status change.
 - **Side-by-Side Horizontal Status Layout:** Certification date and attrition details display inline beside the status pill, keeping row heights compact.

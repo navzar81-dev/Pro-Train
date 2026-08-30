@@ -4,7 +4,25 @@ This document tracks the major iterations, features, and enhancements implemente
 
 ---
 
-## Version 46 (Current Latest)
+## Version 47 (Current Latest)
+**File:** `training_planner_47.html`
+**Focus:** Intelligent Browser-Native Voice Assistant with Two-Way SpeechRecognition (STT), SpeechSynthesis (TTS), and Voice Action Dispatcher
+
+- **100% Zero-Dependency Voice Assistant:** Built directly using modern Web APIs (`window.SpeechRecognition` / `webkitSpeechRecognition` and `window.speechSynthesis`) with no Python, no external libraries, and zero installation requirements.
+- **Hands-Free Speech-to-Text (STT):** Click the 🎙️ mic button in the chat input bar or header to speak queries directly. Features real-time voice streaming, automatic transcription, and automated dispatch on speech completion.
+- **Natural Spoken Text-to-Speech (TTS):** The assistant reads out answers verbally using high-quality system voices with natural cadence.
+- **Speaker Mute / Audio Control:** Added a 🔊 / 🔇 audio toggle button in the chat header, allowing users to enable or mute spoken voice responses at any time (persisted across sessions).
+- **Soundwave & Pulsing Mic UI:** Modern audio waveform HUD and pulsating ring indicators visually signal active listening and speech processing states.
+- **Expanded Operational Voice Actions:**
+  - **Voice Navigation:** *"Go to Gantt view"*, *"Show participants"*, *"Open Dashboard"*, *"Show reports"*.
+  - **Conflict Audit:** *"Check conflicts"* / *"Show conflicts"* (instantly calculates overlaps and applies the conflict filter).
+  - **Batch State Control:** *"Put Batch 2 on hold"* / *"Resume Batch 2"*.
+  - **Automated Reporting:** *"Export participant roster"* / *"Download CSV"*.
+  - **Availability Queries:** *"Is Sarah free tomorrow?"*, *"Free rooms next Monday"*.
+
+---
+
+## Version 46
 **File:** `training_planner_46.html`
 **Focus:** Expanded Participant Status Options, Certification Date Modal, and Inline/Bulk Management
 

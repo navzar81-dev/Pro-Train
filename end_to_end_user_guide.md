@@ -1,6 +1,6 @@
-# ProTrain End-to-End User Guide (v46)
+# ProTrain End-to-End User Guide (v47)
 
-Welcome to **ProTrain**, your all-in-one enterprise Training & Resource Planner. ProTrain is a standalone, single-file HTML web application engineered for high portability, extreme speed, and full offline operation. This comprehensive guide covers all system modules, workflows, scheduling rules, and advanced participant lifecycle features up to **Version 46**.
+Welcome to **ProTrain**, your all-in-one enterprise Training & Resource Planner. ProTrain is a standalone, single-file HTML web application engineered for high portability, extreme speed, and full offline operation. This comprehensive guide covers all system modules, workflows, scheduling rules, and advanced participant lifecycle features up to **Version 47**.
 
 ---
 
@@ -21,7 +21,7 @@ The left sidebar provides instant access to all core application modules:
 - **💾 Database Backup / Restore:** Instant JSON database exports, imports, and auto-save recovery management.
 
 ### Admin Mode vs. View-Only Security
-- **View-Only Mode:** General users can browse schedules, view Gantt timelines, search records, use the conversational assistant, and export CSV reports, but cannot modify records.
+- **View-Only Mode:** General users can browse schedules, view Gantt timelines, search records, use the conversational voice assistant, and export CSV reports, but cannot modify records.
 - **Admin Mode:** Click **Admin Login** in the sidebar and enter your PIN (Default: `0110`) to unlock full write, edit, delete, and bulk update capabilities.
 - **Cryptographic Security:** Admin PIN authentication is verified via SHA-256 hashing, equipped with an offline JavaScript fallback for Microsoft Edge over the `file://` protocol.
 
@@ -135,13 +135,24 @@ In **Admin Mode**, use the inline status pill dropdown on each row:
 
 ---
 
-## 7. Intelligent Conversational Assistant
+## 7. Intelligent Two-Way Voice Assistant (v47)
 
 In the bottom-right corner of the application:
-- Click the floating chat bubble to open the **ProTrain NLP Assistant**.
-- Ask natural language questions (e.g., *"Is Sarah free next Monday?"*, *"Available rooms on September 15"*, or *"Show CC Trainings"*).
-- The assistant analyzes the live database and provides instant availability answers or navigates directly to the requested filtered view.
-- Click the **Undock** button in the chat header to drag and freely resize the assistant anywhere on your screen.
+- Click the floating 💬 chat bubble to open the **ProTrain Voice Assistant**.
+- **Voice Input (Speech-to-Text):** Click the 🎙️ mic button in the input bar or header to speak. An animated soundwave HUD indicates active listening, and speech is transcribed in real-time.
+- **Natural Spoken Feedback (Text-to-Speech):** The assistant speaks out answers using high-quality browser neural voices.
+- **Speaker Mute / Audio Toggle:** Click the 🔊 / 🔇 icon in the chat header to enable or silence spoken voice output.
+- **Dock / Undock:** Click the **Undock** button in the chat header to drag and freely resize the assistant anywhere on your screen.
+
+### Voice Commands & Action Cheat-Sheet:
+| Voice Command | Action Executed | Spoken Feedback |
+| :--- | :--- | :--- |
+| 🗣️ *"Is Sarah free tomorrow?"* | Queries trainer schedule & leaves | 🔊 Verbal confirmation of availability & conflict details |
+| 🗣️ *"Free rooms next Monday"* | Checks physical room bookings | 🔊 Verbal list of all vacant training facilities |
+| 🗣️ *"Put Batch 2 on hold"* / *"Resume Batch 2"* | Sets `isOnHold` and updates timeline | 🔊 *"Batch 2 is now on hold."* |
+| 🗣️ *"Export participant roster"* | Triggers CSV roster download | 🔊 *"Exporting master participant roster to CSV."* |
+| 🗣️ *"Show all conflicts"* | Audits schedule & filters conflicting batches | 🔊 *"Found X active conflicts. Navigating to conflicting batches."* |
+| 🗣️ *"Go to Gantt view / Show Participants"* | Navigates directly to requested tab | 🔊 *"Navigating to Gantt Timeline."* |
 
 ---
 
