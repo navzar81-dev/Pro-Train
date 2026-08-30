@@ -4,7 +4,32 @@ This document tracks the major iterations, features, and enhancements implemente
 
 ---
 
-## Version 44 (Current Latest)
+## Version 46 (Current Latest)
+**File:** `training_planner_46.html`
+**Focus:** Expanded Participant Status Options, Certification Date Modal, and Inline/Bulk Management
+
+- **Multi-State Status System:** Expanded participant status values from binary to **`In Training - Active`**, **`Certified`**, and **`Inactive`**.
+- **Certification Modal & Date Capture:** Setting status to **`Certified`** opens a dedicated Certification Modal to record the **Certification Date** (defaults to current date formatted as `DD/MM/YYYY`).
+- **Preserved Attrition Workflow:** Setting status to **`Inactive`** triggers the existing Attrition Modal to capture type, reason, and date.
+- **Inline Status Pill Dropdown (Admin Mode):** Replaced the binary iOS switch with a sleek, color-coded inline status selector pill allowing single-click updates for Admin users.
+- **Unified Bulk Status Toolbar:** Updated row selection header with a **`Set Status ▾`** dropdown button supporting bulk status updates to `In Training - Active`, `Certified`, or `Inactive`.
+- **Status Filter Chips:** Added instant 1-click filter buttons (`All`, `In Training - Active`, `Certified`, `Inactive`) at the top of the Global Participants Tab.
+- **CSV Roster Export:** Updated `exportParticipantRosterReport` to include `Certification Date` and status values.
+
+---
+
+## Version 45
+**File:** `training_planner_45.html`
+**Focus:** "Room Only" Ad-Hoc Booking Support & Optional Trainer Selection
+
+- **"Room Only" Booking Toggle:** Added a dedicated `"🏢 Room Only Booking"` checkbox in the Schedule/Edit Training form modal.
+- **Optional Trainer & Ad-Hoc Requestor Input:** When "Room Only" is active, trainer selection is no longer mandatory, and an optional **"Booker / Person Name"** field appears to capture contact/requestor details (e.g., *"Jane Smith (HR)"*).
+- **Conflict Detection Preserved:** Room conflict validation remains 100% active to prevent physical double-booking, while trainer conflict rules are safely bypassed if no trainer is assigned.
+- **Table & Export Integration:** Main table rows display styled `🏢 Room Only: [Person Name]` badges, and CSV reports preserve the room-only status.
+
+---
+
+## Version 44
 **File:** `training_planner_44.html`
 **Focus:** Visual Charts and Advanced Room Occupancy Reporting on Dashboard
 
